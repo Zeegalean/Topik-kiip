@@ -19,6 +19,7 @@ import {
   cleanName,
   parsePassportTextOrSvg
 } from '../utils/sanitizers';
+import { extractDocumentsClientSide, mergeExtractedIntoFormData } from '../utils/clientOcrEngine';
 import { 
   Sparkles, 
   CheckCircle2, 
@@ -88,27 +89,11 @@ export const Step2FormTemplate: React.FC<Step2FormTemplateProps> = ({
   const [extractError, setExtractError] = useState<string | null>(null);
   const [isHighDemandError, setIsHighDemandError] = useState(false);
 
-  // Seal Unlock Handler (Unmasks / Unlocks the form with confetti & official seal)
+  // Seal Unlock Handler -> Opens Payment Modal to unlock clean form
   const handleSealUnlock = () => {
-    try {
-      confetti({
-        particleCount: 90,
-        spread: 80,
-        origin: { y: 0.5 },
-      });
-    } catch {}
-    if (setIsPaid) {
-      setIsPaid(true);
+    if (onOpenPayment) {
+      onOpenPayment();
     }
-    setExtractSuccess(true);
-    setExtractSuccessMsg(
-      lang === "km"
-        ? "✓ ត្រាដោះសោផ្លូវការត្រូវបានអនុវត្តជោគជ័យ! ការបិទបាំងលើ Form ត្រូវបានដកចេញស្អាត ១០០%។"
-        : lang === "ko"
-        ? "✓ 사회통합프로그램 접수·승인 직인이 날인되어 반려본 잠금이 완전히 해제되었습니다!"
-        : "✓ Official Seal Applied! Form masking has been completely removed."
-    );
-    setTimeout(() => setExtractSuccess(false), 5000);
   };
 
   // Signature interactive settings (uses props if passed, or internal state fallback)
@@ -421,134 +406,60 @@ export const Step2FormTemplate: React.FC<Step2FormTemplateProps> = ({
     }
 
     try {
-      const response = await fetch('/api/extract-documents', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      let extractedFromServer = false;
+      try {
+        const response = await fetch('/api/extract-documents', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            arcFront: frontToUse,
+            arcBack: backToUse,
+            topikCert: firstTopik,
+            topikCertList: firstTopik && docs.topikCertList.length === 0 ? [{ id: 'quick', dataUrl: firstTopik, name: 'TOPIK Score Report' }] : docs.topikCertList,
+            passport: docs.passportList[0]?.dataUrl || null,
+          }),
+        });
+
+        if (response.ok) {
+          const resData = await response.json().catch(() => ({}));
+          if (resData && resData.data && !resData.fallbackMode) {
+            const ext = resData.data;
+            setFormData((prev) => mergeExtractedIntoFormData(prev, ext));
+            extractedFromServer = true;
+            setExtractSuccess(true);
+            setExtractSuccessMsg('✓ បានបំពេញ និងផ្ទៀងផ្ទាត់ពាក្យសុំ (신청서 작성) ដោយស្វ័យប្រវត្តិជោគជ័យ ១០០%!');
+            setTimeout(() => setExtractSuccess(false), 9000);
+          }
+        }
+      } catch {
+        // Server endpoint unreachable (e.g. GitHub Pages static deployment) -> run browser OCR below
+      }
+
+      if (!extractedFromServer) {
+        const clientResult = await extractDocumentsClientSide({
           arcFront: frontToUse,
           arcBack: backToUse,
           topikCert: firstTopik,
-          topikCertList: firstTopik && docs.topikCertList.length === 0 ? [{ id: 'quick', dataUrl: firstTopik, name: 'TOPIK Score Report' }] : docs.topikCertList,
           passport: docs.passportList[0]?.dataUrl || null,
-        }),
-      });
-
-      const resData = await response.json().catch(() => ({}));
-
-      if (resData && resData.data) {
-        const ext = resData.data;
-
-        // Update form state with sanitized extracted values
-        setFormData((prev) => {
-          const docParts = normalizeDocVerificationNo(
-            ext.docVerificationNo,
-            prev.docVerificationNo
-          );
-          const reg = normalizeRegNumbers(
-            ext.regNumber1 || prev.regNumber1,
-            ext.regNumber2 || prev.regNumber2
-          );
-          const name = cleanName(ext.name || prev.name);
-
-          return {
-            ...prev,
-            name: name,
-            applicantName: name,
-            regNumber1: reg.regNumber1,
-            regNumber2: reg.regNumber2,
-            gender: ext.gender === '여' ? '여' : (ext.gender === '남' ? '남' : reg.gender),
-            nationality: ext.nationality || prev.nationality || 'Cambodia',
-            visaStatus: cleanVisaStatus(ext.visaStatus || prev.visaStatus) || 'E-9-1',
-            passportNo: (ext.passportNo || prev.passportNo || (docs.passportList.length > 0 ? "N01847291" : "")).toUpperCase().trim(),
-            passportExpiry: ext.passportExpiry || prev.passportExpiry || (docs.passportList.length > 0 ? "2031-08-15" : ""),
-            address: ext.address || prev.address || '충청남도 서산시 수석산업로 85-9 (수석동)',
-            docVerificationNo: docParts,
-            examNumber: cleanExamNumber(ext.examNumber || prev.examNumber),
-            examDate: ext.examDate || prev.examDate || '2026-07-05',
-            round: cleanRound(ext.round || prev.round),
-            validUntil: ext.validUntil || prev.validUntil || '2028-08-12',
-            grade: cleanGrade(ext.grade || prev.grade),
-          };
         });
 
+        setFormData((prev) => mergeExtractedIntoFormData(prev, clientResult));
         setExtractSuccess(true);
-        setExtractSuccessMsg('✓ បានបំពេញ និងផ្ទៀងផ្ទាត់ពាក្យសុំ (신청서 작성) ដោយស្វ័យប្រវត្តិជោគជ័យ ១០០%!');
-        setTimeout(() => setExtractSuccess(false), 9000);
-        return;
+        setExtractSuccessMsg('✓ បានបំពេញ និងផ្ទៀងផ្ទាត់ពាក្យសុំ (신청서 작성) ដោយស្វ័យប្រវត្តិតាមរយៈប្រព័ន្ធស្កេន OCR!');
+        setTimeout(() => setExtractSuccess(false), 8000);
       }
-
-      // Local fallback parser
-      const parsedArc = parseLocalArcData(frontToUse, backToUse);
-      const parsedTopik = firstTopik ? parseLocalTopikData(firstTopik) : null;
-
-      setFormData((prev) => {
-        const docParts = normalizeDocVerificationNo(
-          parsedTopik?.docVerificationNo,
-          prev.docVerificationNo
-        );
-        const reg = normalizeRegNumbers(
-          parsedArc?.regNumber1 || prev.regNumber1,
-          parsedArc?.regNumber2 || prev.regNumber2
-        );
-        const name = cleanName(parsedArc?.name || prev.name);
-
-        return {
-          ...prev,
-          name: name,
-          applicantName: name,
-          regNumber1: reg.regNumber1,
-          regNumber2: reg.regNumber2,
-          gender: parsedArc?.gender || reg.gender,
-          nationality: parsedArc?.nationality || prev.nationality || 'Cambodia',
-          visaStatus: cleanVisaStatus(parsedArc?.visaStatus || prev.visaStatus) || 'E-9-1',
-          address: parsedArc?.address || prev.address || '충청남도 서산시 수석산업로 85-9 (수석동)',
-          docVerificationNo: docParts,
-          examNumber: cleanExamNumber(parsedTopik?.examNumber || prev.examNumber),
-          examDate: parsedTopik?.examDate || prev.examDate || '2026-07-05',
-          round: cleanRound(parsedTopik?.round || prev.round),
-          validUntil: parsedTopik?.validUntil || prev.validUntil || '2028-08-12',
-          grade: cleanGrade(parsedTopik?.grade || prev.grade),
-        };
-      });
-
-      setExtractSuccess(true);
-      setExtractSuccessMsg('✓ បានបំពេញ និងផ្ទៀងផ្ទាត់ពាក្យសុំ (신청서 작성) ដោយស្វ័យប្រវត្តិតាមរយៈម៉ាស៊ីនវិភាគឯកសារ!');
-      setTimeout(() => setExtractSuccess(false), 8000);
     } catch (err: any) {
       console.warn('Extraction notice:', err);
 
       const parsedArc = parseLocalArcData(frontToUse, backToUse);
       const parsedTopik = firstTopik ? parseLocalTopikData(firstTopik) : null;
 
-      setFormData((prev) => {
-        const docParts = normalizeDocVerificationNo(
-          parsedTopik?.docVerificationNo,
-          prev.docVerificationNo
-        );
-        const reg = normalizeRegNumbers(
-          parsedArc?.regNumber1 || prev.regNumber1,
-          parsedArc?.regNumber2 || prev.regNumber2
-        );
-        const name = cleanName(parsedArc?.name || prev.name);
-
-        return {
-          ...prev,
-          name: name,
-          applicantName: name,
-          regNumber1: reg.regNumber1,
-          regNumber2: reg.regNumber2,
-          gender: parsedArc?.gender || reg.gender,
-          nationality: parsedArc?.nationality || prev.nationality || 'Cambodia',
-          visaStatus: cleanVisaStatus(parsedArc?.visaStatus || prev.visaStatus) || 'E-9-1',
-          address: parsedArc?.address || prev.address || '충청남도 서산시 수석산업로 85-9 (수석동)',
-          docVerificationNo: docParts,
-          examNumber: cleanExamNumber(parsedTopik?.examNumber || prev.examNumber),
-          examDate: parsedTopik?.examDate || prev.examDate || '2026-07-05',
-          round: cleanRound(parsedTopik?.round || prev.round),
-          validUntil: parsedTopik?.validUntil || prev.validUntil || '2028-08-12',
-          grade: cleanGrade(parsedTopik?.grade || prev.grade),
-        };
-      });
+      setFormData((prev) =>
+        mergeExtractedIntoFormData(prev, {
+          ...parsedArc,
+          ...parsedTopik,
+        })
+      );
 
       setExtractSuccess(true);
       setExtractSuccessMsg('✓ បានបំពេញ និងផ្ទៀងផ្ទាត់ពាក្យសុំ (신청서 작성) ដោយស្វ័យប្រវត្តិជោគជ័យ!');
@@ -750,25 +661,15 @@ export const Step2FormTemplate: React.FC<Step2FormTemplateProps> = ({
                 type="button"
                 onClick={handleSealUnlock}
                 className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 via-orange-500 to-red-600 hover:from-amber-600 hover:to-red-700 text-white font-black text-xs shadow-md transition-all hover:scale-105 flex items-center gap-1.5 cursor-pointer border-2 border-amber-300"
-                title="ដោះសោការបិទបាំងលើ Form ភ្លាមៗ"
+                title="បង់ប្រាក់ដើម្បីដោះសោការបិទបាំងលើ Form"
               >
-                <Unlock className="w-4 h-4 text-amber-200" />
-                <span>{lang === "km" ? "🔓 ត្រាដោះសោការបិទបាំង (Seal Unlock)" : "🔓 직인 날인 해제 (Seal Unlock)"}</span>
+                <Lock className="w-4 h-4 text-amber-200" />
+                <span>{lang === "km" ? "🔒 បង់ប្រាក់ដោះសោការបិទបាំង" : "🔒 결제로 잠금 해제"}</span>
               </button>
             ) : (
               <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-900 border border-emerald-300 text-xs font-bold shadow-2xs">
                 <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                <span>{lang === "km" ? "✓ ត្រាដោះសោស្អាត" : "✓ 직인 승인됨 (Clean)"}</span>
-                {setIsPaid && (
-                  <button
-                    type="button"
-                    onClick={() => setIsPaid(false)}
-                    className="text-[10px] text-slate-400 hover:text-slate-600 underline ml-1 cursor-pointer"
-                    title="ចាក់សោបិទបាំងឡើងវិញ"
-                  >
-                    បិទបាំងវិញ
-                  </button>
-                )}
+                <span>{lang === "km" ? "✓ ដោះសោរួចរាល់ (Clean)" : "✓ 잠금 해제됨 (Clean)"}</span>
               </div>
             )}
           </div>

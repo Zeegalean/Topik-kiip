@@ -33,7 +33,7 @@ import {
   Shield
 } from 'lucide-react';
 
-const DEFAULT_BG_URL = './study_background.jpg';
+const DEFAULT_BG_URL = './study_background_v2.jpg';
 
 export default function App() {
   // Language detection with persistence
@@ -100,15 +100,9 @@ export default function App() {
   const [currentStep, setCurrentStep] = useState<number>(1);
   const [activeTab, setActiveTab] = useState<'flow' | 'guide'>('flow');
 
-  // Background Wallpaper State
-  const [bgImage, setBgImage] = useState<string | null>(() => {
-    const saved = localStorage.getItem('app_custom_bg');
-    return saved !== null ? saved : DEFAULT_BG_URL;
-  });
-  const [bgOpacity, setBgOpacity] = useState<number>(() => {
-    const saved = localStorage.getItem('app_bg_opacity');
-    return saved ? parseFloat(saved) : 0.22;
-  });
+  // Background Wallpaper State (Always defaults to the user's provided background image)
+  const [bgImage, setBgImage] = useState<string | null>(DEFAULT_BG_URL);
+  const [bgOpacity, setBgOpacity] = useState<number>(0.26);
   const [isBgModalOpen, setIsBgModalOpen] = useState<boolean>(false);
 
   // Form State
@@ -148,20 +142,13 @@ export default function App() {
   // Payment & Watermark Unlock State (Persisted in localStorage)
   const [isPaid, setIsPaid] = useState<boolean>(() => {
     try {
-      return localStorage.getItem('kiip_doc_paid') === 'true';
+      return localStorage.getItem('kiip_doc_paid_v3') === 'true';
     } catch {
       return false;
     }
   });
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
-
-  const handleSkipPayment = () => {
-    try {
-      localStorage.setItem('kiip_doc_paid', 'true');
-    } catch {}
-    setIsPaid(true);
-    setIsPaymentModalOpen(false);
-  };
+  const [pendingStepAfterPayment, setPendingStepAfterPayment] = useState<number | null>(null);
 
   // Form element ref for high-resolution canvas snapshot
   const formRef = useRef<HTMLDivElement | null>(null);
@@ -307,6 +294,11 @@ export default function App() {
             if (s > 1 && !isStep1Ready) {
               return;
             }
+            if (s === 4 && !isPaid) {
+              setPendingStepAfterPayment(4);
+              setIsPaymentModalOpen(true);
+              return;
+            }
             setActiveTab('flow');
             setCurrentStep(s);
           }}
@@ -387,12 +379,21 @@ export default function App() {
                 sigSettings={sigSettings}
                 setSigSettings={setSigSettings}
                 lang={lang}
-                onNext={() => setCurrentStep(4)}
+                onNext={() => {
+                  if (!isPaid) {
+                    setPendingStepAfterPayment(4);
+                    setIsPaymentModalOpen(true);
+                  } else {
+                    setCurrentStep(4);
+                  }
+                }}
                 onPrev={() => setCurrentStep(2)}
                 formRef={formRef}
                 isPaid={isPaid}
-                onOpenPayment={() => setIsPaymentModalOpen(true)}
-                onSkipPayment={handleSkipPayment}
+                onOpenPayment={() => {
+                  setPendingStepAfterPayment(null);
+                  setIsPaymentModalOpen(true);
+                }}
               />
             )}
 
@@ -410,13 +411,21 @@ export default function App() {
         )}
       </main>
 
-      {/* Payment Checkout Modal (Credit Card & PayPal) */}
+      {/* Payment Checkout Modal (Non-closable & Non-skippable until paid) */}
       <PaymentModal
         isOpen={isPaymentModalOpen}
-        onClose={() => setIsPaymentModalOpen(false)}
+        onClose={() => {
+          if (isPaid) {
+            setIsPaymentModalOpen(false);
+          }
+        }}
         onPaymentSuccess={() => {
           setIsPaid(true);
           setIsPaymentModalOpen(false);
+          if (pendingStepAfterPayment === 4) {
+            setCurrentStep(4);
+            setPendingStepAfterPayment(null);
+          }
         }}
         lang={lang}
         formData={formData}

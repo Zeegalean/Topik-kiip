@@ -115,17 +115,6 @@ export const Navbar: React.FC<NavbarProps> = ({
               <span className="sm:hidden">Guide</span>
             </button>
 
-            {/* Load Sample Data Button */}
-            <button
-              onClick={onLoadSample}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 transition-colors shadow-2xs"
-              title={t.loadSampleTooltip}
-            >
-              <Sparkles className="w-3.5 h-3.5 text-emerald-600 animate-pulse" />
-              <span className="hidden md:inline">{t.loadSampleBtn}</span>
-              <span className="md:hidden">Sample</span>
-            </button>
-
             {/* Socinet Notice Button */}
             {onOpenSocinetNotice && (
               <button
@@ -136,18 +125,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
                 <span className="hidden sm:inline">{t.socinetNavbarBtn || 'Socinet'}</span>
                 <span className="sm:hidden">Socinet</span>
-              </button>
-            )}
-
-            {/* Background Settings Button */}
-            {onOpenBgSettings && (
-              <button
-                onClick={onOpenBgSettings}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold text-teal-700 bg-teal-50 hover:bg-teal-100 border border-teal-200 transition-colors shadow-2xs cursor-pointer"
-                title={t.bgSettingsTooltip}
-              >
-                <ImageIcon className="w-3.5 h-3.5 text-teal-600" />
-                <span className="hidden sm:inline">Background</span>
               </button>
             )}
 
@@ -171,19 +148,6 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             {/* PC Desktop App Install Button */}
             <PWAInstallButton lang={lang} isAdmin={isAdmin} />
-
-            {/* Test Download Button */}
-            {onTestDownload && (
-              <button
-                onClick={onTestDownload}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold text-white bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 transition-all shadow-xs hover:scale-[1.02] cursor-pointer"
-                title={t.testDownloadTooltip}
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">{t.testDownloadBtn}</span>
-                <span className="sm:hidden">Download</span>
-              </button>
-            )}
 
             {/* 50 Languages Selector & Modal Button */}
             <div className="flex items-center gap-1">
@@ -293,10 +257,10 @@ export const Navbar: React.FC<NavbarProps> = ({
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="grid grid-cols-4 gap-1 sm:gap-3">
               {steps.map((s) => {
-                const Icon = s.icon;
                 const isActive = currentStep === s.num;
                 const isCompleted = currentStep > s.num;
                 const isLocked = s.num > 1 && !isStep1Ready;
+                const isPayLocked = s.num === 4 && !isPaid;
 
                 return (
                   <button
@@ -306,7 +270,13 @@ export const Navbar: React.FC<NavbarProps> = ({
                       if (isLocked) return;
                       setCurrentStep(s.num);
                     }}
-                    title={isLocked ? (t.stepLockedAlert || 'សូមបំពេញឯកសាចាំបាច់ទាំងអស់ក្នុងជំហ៊ានទី ១ ជាមុនសិន') : undefined}
+                    title={
+                      isLocked
+                        ? (t.stepLockedAlert || 'សូមបំពេញឯកសាចាំបាច់ទាំងអស់ក្នុងជំហ៊ានទី ១ ជាមុនសិន')
+                        : isPayLocked
+                        ? 'តម្រូវឱ្យបង់ប្រាក់ជាមុនសិន ទើបអាចបន្តទៅជំហានទី ៤ បាន'
+                        : undefined
+                    }
                     className={`flex items-center justify-center sm:justify-start gap-1.5 sm:gap-2.5 px-2 sm:px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
                       isActive
                         ? 'bg-blue-600 text-white shadow-xs'
@@ -314,7 +284,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                         ? 'bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100'
                         : isLocked
                         ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-70'
-                        : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+                        : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100 cursor-pointer'
                     }`}
                   >
                     <div
@@ -325,14 +295,16 @@ export const Navbar: React.FC<NavbarProps> = ({
                           ? 'bg-emerald-600 text-white'
                           : isLocked
                           ? 'bg-slate-200 text-slate-400'
+                          : isPayLocked
+                          ? 'bg-rose-100 text-rose-600'
                           : 'bg-slate-200 text-slate-700'
                       }`}
                     >
-                      {isCompleted ? '✓' : isLocked ? <Lock className="w-2.5 h-2.5" /> : s.num}
+                      {isCompleted ? '✓' : (isLocked || isPayLocked) ? <Lock className="w-2.5 h-2.5" /> : s.num}
                     </div>
                     <span className="truncate hidden sm:inline">{s.label}</span>
                     <span className="sm:hidden font-bold">Step {s.num}</span>
-                    {isLocked && <Lock className="w-3 h-3 text-slate-400 hidden sm:inline shrink-0" />}
+                    {(isLocked || isPayLocked) && <Lock className={`w-3 h-3 hidden sm:inline shrink-0 ${isPayLocked ? 'text-rose-500' : 'text-slate-400'}`} />}
                   </button>
                 );
               })}

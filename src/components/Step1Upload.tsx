@@ -14,6 +14,10 @@ import {
   cleanName,
   parsePassportTextOrSvg
 } from '../utils/sanitizers';
+import {
+  extractDocumentsClientSide,
+  mergeExtractedIntoFormData
+} from '../utils/clientOcrEngine';
 import { 
   Upload, 
   Trash2, 
@@ -328,17 +332,19 @@ export const Step1Upload: React.FC<Step1UploadProps> = ({
     }
   };
 
-  // Auto-extract documents using Server AI or fallback parser
+  // Auto-extract documents using Server AI or Client-Side Tesseract OCR (for GitHub Pages / static hosting)
   const handleExtractDocuments = async (
     customTopikUrl?: string,
     customArcFront?: string | null,
-    customArcBack?: string | null
+    customArcBack?: string | null,
+    customPassportUrl?: string | null
   ) => {
     const topikUrl = customTopikUrl !== undefined ? customTopikUrl : docs.topikCertList[0]?.dataUrl;
     const frontUrl = customArcFront !== undefined ? customArcFront : docs.arcFront;
     const backUrl = customArcBack !== undefined ? customArcBack : docs.arcBack;
+    const passportUrl = customPassportUrl !== undefined ? customPassportUrl : docs.passportList[0]?.dataUrl;
 
-    if (!topikUrl && !frontUrl && !backUrl) {
+    if (!topikUrl && !frontUrl && !backUrl && !passportUrl) {
       setExtractError('សូមបញ្ចូលសញ្ញាបត្រ TOPIK ឬកាត ARC ជាមុនសិន!');
       return;
     }
@@ -348,144 +354,66 @@ export const Step1Upload: React.FC<Step1UploadProps> = ({
     setExtractSuccess(false);
 
     try {
-      // First attempt: Server-side Gemini OCR
-      const response = await fetch('/api/extract-documents', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      // 1. Try Server-side Gemini OCR first (when running with backend)
+      let serverSucceeded = false;
+      try {
+        const response = await fetch('/api/extract-documents', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            arcFront: frontUrl,
+            arcBack: backUrl,
+            topikCert: topikUrl,
+            topikCertList: docs.topikCertList,
+            passport: passportUrl,
+          }),
+        });
+
+        const resData = await response.json().catch(() => ({}));
+
+        if (response.ok && resData.success && resData.data && !resData.fallbackMode) {
+          const ext = resData.data;
+          setFormData((prev) => mergeExtractedIntoFormData(prev, ext));
+          serverSucceeded = true;
+          setExtractSuccess(true);
+          setTimeout(() => setExtractSuccess(false), 8000);
+          return;
+        }
+      } catch {
+        // Static hosting (GitHub Pages) - proceed to client-side OCR
+      }
+
+      if (!serverSucceeded) {
+        // 2. Run Client-Side Tesseract.js OCR (Korean + English) directly in the browser!
+        const parsedArc = parseArcTextOrSvg(frontUrl, backUrl);
+        const parsedTopik = topikUrl ? parseTopikTextOrSvg(topikUrl) : null;
+        const clientOcrData = await extractDocumentsClientSide({
           arcFront: frontUrl,
           arcBack: backUrl,
           topikCert: topikUrl,
-          topikCertList: docs.topikCertList,
-          passport: docs.passportList[0]?.dataUrl,
-        }),
-      });
-
-      const resData = await response.json().catch(() => ({}));
-
-      if (response.ok && resData.success && resData.data) {
-        const ext = resData.data;
-        setFormData((prev) => {
-          const docParts = normalizeDocVerificationNo(
-            ext.docVerificationNo,
-            prev.docVerificationNo
-          );
-          const reg = normalizeRegNumbers(
-            ext.regNumber1 || prev.regNumber1,
-            ext.regNumber2 || prev.regNumber2
-          );
-          const applicantName = cleanName(ext.name || prev.name);
-
-          return {
-            ...prev,
-            name: applicantName,
-            applicantName: applicantName,
-            regNumber1: reg.regNumber1,
-            regNumber2: reg.regNumber2,
-            gender: ext.gender === '여' ? '여' : (ext.gender === '남' ? '남' : reg.gender),
-            nationality: ext.nationality || prev.nationality,
-            visaStatus: cleanVisaStatus(ext.visaStatus || prev.visaStatus),
-            passportNo: (ext.passportNo || prev.passportNo || (docs.passportList.length > 0 ? 'N01847291' : '')).toUpperCase().trim(),
-            passportExpiry: ext.passportExpiry || prev.passportExpiry || (docs.passportList.length > 0 ? '2031-08-15' : ''),
-            address: ext.address || prev.address,
-            docVerificationNo: docParts,
-            examNumber: cleanExamNumber(ext.examNumber || prev.examNumber),
-            examDate: ext.examDate || prev.examDate,
-            round: cleanRound(ext.round || prev.round),
-            validUntil: ext.validUntil || prev.validUntil,
-            grade: cleanGrade(ext.grade || prev.grade),
-          };
+          passport: passportUrl,
         });
 
+        const combinedExtracted = {
+          ...(parsedArc || {}),
+          ...(parsedTopik || {}),
+          ...clientOcrData,
+        };
+
+        setFormData((prev) => mergeExtractedIntoFormData(prev, combinedExtracted));
         setExtractSuccess(true);
         setTimeout(() => setExtractSuccess(false), 8000);
-        return;
       }
-
-      // Local parser fallback for both ARC and TOPIK
-      const parsedArc = parseArcTextOrSvg(frontUrl, backUrl);
-      const parsedPassport = parsePassportTextOrSvg(docs.passportList[0]?.dataUrl);
-      const parsedTopik = topikUrl ? parseTopikTextOrSvg(topikUrl) : null;
-
-      if (parsedArc || parsedTopik) {
-        setFormData((prev) => {
-          const docParts = normalizeDocVerificationNo(
-            parsedTopik?.docVerificationNo,
-            prev.docVerificationNo
-          );
-          const reg = normalizeRegNumbers(
-            parsedArc?.regNumber1 || prev.regNumber1,
-            parsedArc?.regNumber2 || prev.regNumber2
-          );
-          const applicantName = cleanName(parsedArc?.name || prev.name);
-
-          return {
-            ...prev,
-            name: applicantName,
-            applicantName: applicantName,
-            regNumber1: reg.regNumber1,
-            regNumber2: reg.regNumber2,
-            gender: parsedArc?.gender || reg.gender,
-            nationality: parsedArc?.nationality || prev.nationality,
-            visaStatus: cleanVisaStatus(parsedArc?.visaStatus || prev.visaStatus),
-            passportNo: (parsedPassport.passportNo || prev.passportNo || (docs.passportList.length > 0 ? 'N01847291' : '')).toUpperCase().trim(),
-            passportExpiry: parsedPassport.passportExpiry || prev.passportExpiry || (docs.passportList.length > 0 ? '2031-08-15' : ''),
-            address: parsedArc?.address || prev.address,
-            docVerificationNo: docParts,
-            examNumber: cleanExamNumber(parsedTopik?.examNumber || prev.examNumber),
-            examDate: parsedTopik?.examDate || prev.examDate,
-            round: cleanRound(parsedTopik?.round || prev.round),
-            validUntil: parsedTopik?.validUntil || prev.validUntil,
-            grade: cleanGrade(parsedTopik?.grade || prev.grade),
-          };
-        });
-        setExtractSuccess(true);
-        setTimeout(() => setExtractSuccess(false), 8000);
-        return;
-      }
-
-      // Fallback for sample certificate
-      if (topikUrl && (topikUrl.includes('107') || topikUrl.includes('TOPIK'))) {
-        setFormData((prev) => ({
-          ...prev,
-          docVerificationNo: ['9849', '2820', '3579', '7920'],
-          examNumber: '0010197000017',
-          examDate: '2026-07-05',
-          round: '107',
-          validUntil: '2028-08-12',
-          grade: '2급',
-        }));
-        setExtractSuccess(true);
-        setTimeout(() => setExtractSuccess(false), 8000);
-        return;
-      }
-
-      throw new Error(resData.error || 'Failed to extract document details');
     } catch (err: any) {
       console.warn('Extraction notice:', err);
-      // Graceful assignment so user is never blocked
       const parsedArc = parseArcTextOrSvg(frontUrl, backUrl);
       const parsedTopik = topikUrl ? parseTopikTextOrSvg(topikUrl) : null;
-
-      setFormData((prev) => ({
-        ...prev,
-        name: parsedArc?.name || prev.name || 'SOK SRORNG',
-        applicantName: parsedArc?.name || prev.applicantName || 'SOK SRORNG',
-        regNumber1: parsedArc?.regNumber1 || prev.regNumber1 || '950910',
-        regNumber2: parsedArc?.regNumber2 || prev.regNumber2 || '5760023',
-        gender: parsedArc?.gender || prev.gender || '남',
-        nationality: parsedArc?.nationality || prev.nationality || 'Cambodia',
-        visaStatus: cleanVisaStatus(parsedArc?.visaStatus || prev.visaStatus) || 'E-9-1',
-        passportNo: (parsePassportTextOrSvg(docs.passportList[0]?.dataUrl).passportNo || prev.passportNo || 'N01847291').toUpperCase().trim(),
-        passportExpiry: parsePassportTextOrSvg(docs.passportList[0]?.dataUrl).passportExpiry || prev.passportExpiry || '2031-08-15',
-        address: parsedArc?.address || prev.address || '충청남도 서산시 수석산업로 85-9 (수석동)',
-        docVerificationNo: parsedTopik?.docVerificationNo || (prev.docVerificationNo[0] ? prev.docVerificationNo : ['9849', '2820', '3579', '7920']),
-        examNumber: parsedTopik?.examNumber || prev.examNumber || '0010197000017',
-        examDate: parsedTopik?.examDate || prev.examDate || '2026-07-05',
-        round: parsedTopik?.round || prev.round || '107',
-        validUntil: parsedTopik?.validUntil || prev.validUntil || '2028-08-12',
-        grade: parsedTopik?.grade || prev.grade || '2급',
-      }));
+      setFormData((prev) =>
+        mergeExtractedIntoFormData(prev, {
+          ...(parsedArc || {}),
+          ...(parsedTopik || {}),
+        })
+      );
       setExtractSuccess(true);
     } finally {
       setIsExtractingTopik(false);
@@ -530,12 +458,7 @@ export const Step1Upload: React.FC<Step1UploadProps> = ({
         passportList: [...prev.passportList, ...newItems],
       }));
       if (newItems.length > 0 && newItems[0].dataUrl) {
-        const parsedPass = parsePassportTextOrSvg(newItems[0].dataUrl);
-        setFormData((prev) => ({
-          ...prev,
-          passportNo: prev.passportNo || parsedPass.passportNo || 'N01847291',
-          passportExpiry: prev.passportExpiry || parsedPass.passportExpiry || '2031-08-15',
-        }));
+        handleExtractDocuments(undefined, docs.arcFront, docs.arcBack, newItems[0].dataUrl);
       }
     } catch (err) {
       console.error('Passport read error:', err);

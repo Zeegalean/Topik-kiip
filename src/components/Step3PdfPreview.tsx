@@ -241,17 +241,6 @@ export const Step3PdfPreview: React.FC<Step3PdfPreviewProps> = ({
                   <Lock className="w-4 h-4" />
                   <span>{t.payToUnlockCleanBtn}</span>
                 </button>
-
-                {onSkipPayment && (
-                  <button
-                    onClick={onSkipPayment}
-                    className="px-4 py-3.5 rounded-2xl bg-slate-900 hover:bg-black text-white font-bold text-xs sm:text-sm shadow-lg flex items-center justify-center gap-1.5 transition-all hover:scale-[1.02] cursor-pointer"
-                    title="Skip ដំណាក់កាលនេះសិន (ដោះសោសាកល្បង)"
-                  >
-                    <span>{lang === 'km' ? 'Skip ដំណាក់កាលនេះសិន' : lang === 'ko' ? '지금 건너뛰기' : 'Skip for now'}</span>
-                    <ArrowRight className="w-4 h-4 text-emerald-400" />
-                  </button>
-                )}
               </div>
             ) : (
               <button
@@ -305,17 +294,6 @@ export const Step3PdfPreview: React.FC<Step3PdfPreviewProps> = ({
                 >
                   <CreditCard className="w-3.5 h-3.5" />
                   <span>{t.payToUnlockCleanBtn}</span>
-                </button>
-              )}
-              {onSkipPayment && (
-                <button
-                  type="button"
-                  onClick={onSkipPayment}
-                  className="px-3.5 py-2.5 rounded-xl bg-slate-900 hover:bg-black text-white font-bold text-xs shadow-md flex items-center justify-center gap-1.5 cursor-pointer transition-all hover:scale-[1.02]"
-                  title="Skip ដំណាក់កាលនេះសិន"
-                >
-                  <span>{lang === 'km' ? 'Skip ដំណាក់កាលនេះ' : '건너뛰기'}</span>
-                  <ArrowRight className="w-3.5 h-3.5 text-emerald-400" />
                 </button>
               )}
             </div>
