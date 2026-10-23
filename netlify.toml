@@ -1,5 +1,5 @@
 [build]
-  command = "echo 'Using prebuilt dist'"
+  command = "mkdir -p dist && cp -r docs/* dist/"
   publish = "dist"
 
 [[redirects]]

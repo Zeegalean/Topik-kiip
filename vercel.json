@@ -1,5 +1,5 @@
 {
-  "buildCommand": "echo 'Using prebuilt dist'",
+  "buildCommand": "mkdir -p dist && cp -r docs/* dist/",
   "outputDirectory": "dist",
   "rewrites": [
     { "source": "/(.*)", "destination": "/index.html" }
