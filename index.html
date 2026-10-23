@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="km">
+  <head>
+    <meta charset="UTF-8" />
+    <script>
+      (function() {
+        // 1. Mock WebSocket for Vite HMR in cloud preview to prevent "WebSocket closed without opened"
+        try {
+          var OriginalWebSocket = window.WebSocket;
+          if (OriginalWebSocket) {
+            window.WebSocket = function(url, protocols) {
+              if (
+                protocols === "vite-hmr" ||
+                (typeof url === "string" && (url.indexOf("token=") !== -1 || url.indexOf("@vite") !== -1))
+              ) {
+                var mockWs = {
+                  readyState: 1, // OPEN
+                  OPEN: 1,
+                  CLOSED: 3,
+                  CLOSING: 2,
+                  CONNECTING: 0,
+                  url: url,
+                  send: function() {},
+                  close: function() {},
+                  addEventListener: function(event, handler) {
+                    if (event === "open") {
+                      setTimeout(function() {
+                        try { handler({ type: "open" }); } catch(e) {}
+                      }, 10);
+                    }
+                  },
+                  removeEventListener: function() {},
+                  dispatchEvent: function() { return true; },
+                };
+                return mockWs;
+              }
+              return new OriginalWebSocket(url, protocols);
+            };
+            window.WebSocket.prototype = OriginalWebSocket.prototype;
+          }
+        } catch (e) {}
+
+        // 2. Comprehensive error suppression for dev WebSocket notices
+        var origConsoleError = console.error;
+        console.error = function() {
+          var args = Array.prototype.slice.call(arguments);
+          for (var i = 0; i < args.length; i++) {
+            var item = args[i];
+            var str = "";
+            if (item && item.message) str = item.message + " " + (item.stack || "");
+            else if (item && item.stack) str = item.stack;
+            else str = String(item || "");
+            if (
+              str.indexOf("WebSocket") !== -1 ||
+              str.indexOf("@vite/client") !== -1 ||
+              str.indexOf("vite:ws") !== -1 ||
+              (str.indexOf("[vite]") !== -1 && (str.indexOf("closed") !== -1 || str.indexOf("failed to connect") !== -1))
+            ) {
+              return;
+            }
+          }
+          origConsoleError.apply(console, args);
+        };
+
+        window.addEventListener("error", function(e) {
+          var msg = (e && e.message) ? e.message : "";
+          var fn = (e && e.filename) ? e.filename : "";
+          if (msg.indexOf("WebSocket") !== -1 || fn.indexOf("@vite/client") !== -1) {
+            e.stopImmediatePropagation();
+            e.preventDefault();
+            return true;
+          }
+        }, true);
+
+        window.addEventListener("unhandledrejection", function(e) {
+          var r = String((e && e.reason) || "");
+          if (r.indexOf("WebSocket") !== -1 || r.indexOf("@vite/client") !== -1) {
+            e.stopImmediatePropagation();
+            e.preventDefault();
+          }
+        }, true);
+      })();
+    </script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#2563eb" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="KIIP App" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="shortcut icon" href="/favicon.ico" />
+    <title>KIIP & TOPIK 연계 신청 포털 (KIIP Integration Portal)</title>
+    <meta name="description" content="사회통합프로그램(KIIP) TOPIK 성적 연계 신청서 원클릭 자동 작성, 서류 PDF 통합 병합, 출입국 이민통합지원센터 관할 이메일 자동 매칭 및 제출 시스템" />
+    <meta property="og:title" content="KIIP & TOPIK 연계 신청 포털 (KIIP Integration Portal)" />
+    <meta property="og:description" content="사회통합프로그램(KIIP) TOPIK 성적 연계 신청서 원클릭 자동 작성, 서류 PDF 통합 병합, 출입국 이민통합지원센터 관할 이메일 자동 매칭 및 제출 시스템" />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Bokor&family=Kantumruy+Pro:wght@300;400;500;600;700&family=Noto+Serif+KR:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+      <script>
+      // Gracefully prevent unhandled WebSocket closure error in cloud preview environments
+      window.addEventListener("error", function(e) {
+        if (e && (e.message?.includes("WebSocket") || e.filename?.includes("@vite/client"))) {
+          e.stopImmediatePropagation();
+          e.preventDefault();
+        }
+      });
+      window.addEventListener("unhandledrejection", function(e) {
+        if (e && String(e.reason).includes("WebSocket")) {
+          e.stopImmediatePropagation();
+          e.preventDefault();
+        }
+      });
+    </script>
+  </head>
+  <body class="bg-slate-50 text-slate-900 antialiased font-sans">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

@@ -1,0 +1,59 @@
+@import "tailwindcss";
+
+/* Define @font-face for Khmer OS Bokor so that it aliases to Bokor / local Khmer OS Bokor */
+@font-face {
+  font-family: 'Khmer OS Bokor';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: local('Khmer OS Bokor'),
+       local('Bokor'),
+       url('https://fonts.gstatic.com/s/bokor/v32/m8JcjfpeeaqTiR2W.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Khmer OS Bokor';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: local('Khmer OS Bokor Bold'),
+       local('Khmer OS Bokor'),
+       local('Bokor'),
+       url('https://fonts.gstatic.com/s/bokor/v32/m8JcjfpeeaqTiR2W.ttf') format('truetype');
+}
+
+@theme {
+  --font-sans: 'Khmer OS Bokor', 'Bokor', 'Kantumruy Pro', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-bokor: 'Khmer OS Bokor', 'Bokor', cursive, sans-serif;
+}
+
+@layer base {
+  html, body, button, input, select, textarea {
+    font-family: 'Khmer OS Bokor', 'Bokor', 'Kantumruy Pro', -apple-system, BlinkMacSystemFont, sans-serif;
+    letter-spacing: 0.015em;
+  }
+}
+
+/* Khmer OS Bokor Font Utility Classes */
+.font-bokor,
+.font-khmer-bokor,
+.font-khmer,
+body[data-lang="km"],
+.lang-khmer {
+  font-family: 'Khmer OS Bokor', 'Bokor', cursive, sans-serif;
+}
+
+/* Specific styling for Khmer text readability with Bokor */
+.lang-khmer {
+  line-height: 1.6;
+}
+
+.font-serif {
+  font-family: 'Noto Serif KR', 'Batang', 'Nanum Myeongjo', serif;
+}
+
+@media print {
+  body {
+    background: #ffffff !important;
+  }
+}
