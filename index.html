@@ -4,6 +4,28 @@
     <meta charset="UTF-8" />
     <script>
       (function() {
+        // Purge stale Service Worker & Workbox caches on mobile browsers once per release version
+        try {
+          var SW_VER = "kiip_ocr_v4";
+          if (window.localStorage && localStorage.getItem("sw_cache_ver") !== SW_VER) {
+            localStorage.setItem("sw_cache_ver", SW_VER);
+            if ("serviceWorker" in navigator) {
+              navigator.serviceWorker.getRegistrations().then(function(regs) {
+                for (var i = 0; i < regs.length; i++) {
+                  regs[i].unregister();
+                }
+              });
+            }
+            if ("caches" in window) {
+              caches.keys().then(function(names) {
+                for (var j = 0; j < names.length; j++) {
+                  caches.delete(names[j]);
+                }
+              });
+            }
+          }
+        } catch (e) {}
+
         // 1. Mock WebSocket for Vite HMR in cloud preview to prevent "WebSocket closed without opened"
         try {
           var OriginalWebSocket = window.WebSocket;
@@ -114,8 +136,8 @@
         }
       });
     </script>
-    <script type="module" crossorigin src="./assets/index-DkapQyuB.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-BwIRKnXL.css">
+    <script type="module" crossorigin src="./assets/index-GPMQo0JB.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-BkVuKfYd.css">
   <link rel="manifest" href="./manifest.webmanifest"><script id="vite-plugin-pwa:register-sw" src="./registerSW.js"></script></head>
   <body class="bg-slate-50 text-slate-900 antialiased font-sans">
     <div id="root"></div>
