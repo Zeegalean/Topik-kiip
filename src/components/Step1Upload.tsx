@@ -809,7 +809,7 @@ export const Step1Upload: React.FC<Step1UploadProps> = ({
       <div className="relative overflow-hidden rounded-3xl border border-teal-300/60 bg-gradient-to-r from-slate-900 via-teal-950 to-slate-900 text-white shadow-md">
         <div className="absolute inset-0 opacity-20 pointer-events-none">
           <img
-            src="/study_background.jpg"
+            src="./study_background.jpg"
             alt="TOPIK Study Background"
             referrerPolicy="no-referrer"
             className="w-full h-full object-cover object-center"
@@ -819,7 +819,7 @@ export const Step1Upload: React.FC<Step1UploadProps> = ({
           <div className="flex items-center gap-4 sm:gap-5 w-full">
             <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl overflow-hidden border-2 border-teal-400/50 shadow-md shrink-0 bg-slate-800">
               <img
-                src="/study_background.jpg"
+                src="./study_background.jpg"
                 alt="Study Motivation"
                 referrerPolicy="no-referrer"
                 className="w-full h-full object-cover hover:scale-110 transition-transform duration-500"

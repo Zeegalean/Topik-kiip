@@ -33,7 +33,7 @@ import {
   Shield
 } from 'lucide-react';
 
-const DEFAULT_BG_URL = '/study_background.jpg';
+const DEFAULT_BG_URL = './study_background.jpg';
 
 export default function App() {
   // Language detection with persistence
