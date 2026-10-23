@@ -11,6 +11,17 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const port = 3000;
 
+// Enable CORS so static frontends (e.g., GitHub Pages) can also use the Cloud Run OCR API
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+  next();
+});
+
 // 1. Direct PC desktop package zip download with strict non-caching & explicit stream
 app.get(['/api/download-pc-package', '/download-pc-package', '/kiip-topik-pc-package.zip'], (req, res) => {
   const filePath = path.resolve('public/kiip-topik-pc-package.zip');
@@ -97,7 +108,8 @@ function sanitizeExtractedData(raw: any): Record<string, any> {
     if (!r2) r2 = r1.slice(6);
     r1 = r1.slice(0, 6);
   }
-  if (r2.length > 7) r2 = r2.slice(0, 7);
+  if (r2.length >= 13) r2 = r2.slice(6, 13);
+  else if (r2.length > 7) r2 = r2.slice(0, 7);
   if (r1.length === 6 && r1 !== '000000') {
     result.regNumber1 = r1;
   }
@@ -465,7 +477,15 @@ app.post('/api/extract-documents', async (req, res) => {
         const meta = dataUrl.substring(0, commaIdx);
         const rawBase64 = dataUrl.substring(commaIdx + 1).replace(/\s/g, '');
         let mime = meta.split(';')[0]?.replace('data:', '') || 'image/jpeg';
-        if (mime === 'image/jpg') mime = 'image/jpeg';
+        if (
+          mime === 'image/jpg' ||
+          mime === 'image/jfif' ||
+          mime === 'image/pjpeg' ||
+          mime === 'application/octet-stream' ||
+          !mime.startsWith('image/') && mime !== 'application/pdf'
+        ) {
+          mime = 'image/jpeg';
+        }
         if (rawBase64) {
           parts.push({
             inlineData: {
@@ -563,8 +583,8 @@ Return ONLY structured JSON according to the schema.
 
     parts.push({ text: extractionPrompt });
 
-    // Multi-model resilience: try fast and high-availability gemini-3.1-flash-lite first, then gemini-3.8-flash
-    const candidateModels = ['gemini-3.1-flash-lite', 'gemini-3.8-flash'];
+    // Multi-model resilience: try fast and high-availability gemini-3.1-flash-lite first, then gemini-3.8-flash and gemini-flash-latest
+    const candidateModels = ['gemini-3.1-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest'];
     let extractedData: any = null;
     let successfulModel = '';
 
@@ -621,11 +641,7 @@ Return ONLY structured JSON according to the schema.
       } catch (err: any) {
         const errMsg = typeof err?.message === 'string' ? err.message : JSON.stringify(err || '');
         console.warn(`[OCR] Model '${model}' failed: ${errMsg}`);
-
-        if (errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('quota') || err?.status === 429) {
-          console.warn(`[OCR] Model '${model}' hit quota limit (429). Proceeding to client/structural OCR.`);
-          break;
-        }
+        continue;
       }
     }
 

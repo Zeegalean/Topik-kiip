@@ -99,7 +99,9 @@ export function normalizeRegNumbers(
     r1 = r1.slice(0, 6);
   }
 
-  if (r2.length > 7) {
+  if (r2.length >= 13) {
+    r2 = r2.slice(6, 13);
+  } else if (r2.length > 7) {
     r2 = r2.slice(0, 7);
   }
 
@@ -192,11 +194,11 @@ export function parsePassportTextOrSvg(passportUrl?: string | null): {
   passportNo: string;
   passportExpiry: string;
 } {
-  const defaultVal = {
-    passportNo: "N01847291",
-    passportExpiry: "2031-08-15",
+  const emptyVal = {
+    passportNo: "",
+    passportExpiry: "",
   };
-  if (!passportUrl) return defaultVal;
+  if (!passportUrl) return emptyVal;
 
   let text = "";
   if (passportUrl.startsWith("data:image/svg+xml")) {
@@ -211,40 +213,40 @@ export function parsePassportTextOrSvg(passportUrl?: string | null): {
     }
   }
 
+  if (!text) return emptyVal;
+
   let passNo = "";
   let passExp = "";
 
-  if (text) {
-    // 1. Passport number: e.g. N01847291 or M12345678
-    const passMatch =
-      text.match(/(?:Passport\s*No\.?|여\s*권\s*번\s*호|លេខលិខិតឆ្លងដែន)[^\w]*([A-Z][0-9]{7,9})/i) ||
-      text.match(/\b([A-Z]\d{8})\b/) ||
-      text.match(/(N01847291|M\d{8}|C\d{8})/i);
-    if (passMatch) {
-      passNo = passMatch[1].toUpperCase().trim();
-    }
+  // 1. Passport number: e.g. N01847291 or M12345678
+  const passMatch =
+    text.match(/(?:Passport\s*No\.?|여\s*권\s*번\s*호|លេខលិខិតឆ្លងដែន)[^\w]*([A-Z][0-9]{7,9})/i) ||
+    text.match(/\b([A-Z]\d{8})\b/) ||
+    text.match(/(N01847291|M\d{8}|C\d{8})/i);
+  if (passMatch) {
+    passNo = passMatch[1].toUpperCase().trim();
+  }
 
-    // 2. Passport expiry date
-    const expMatch =
-      text.match(/(?:Date\s*of\s*Expiry|Expiry\s*Date|만\s*료\s*일(?:\s*자)?|유\s*효\s*기\s*간|ថ្ងៃផុតកំណត់)[^\d]*(\d{4})[.\-\s년/]+(\d{1,2})[.\-\s월/]+(\d{1,2})/i) ||
-      text.match(/(?:Date\s*of\s*Expiry|Expiry)[^\d]*(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})/i);
-    if (expMatch) {
-      if (expMatch[3] && expMatch[3].length === 4) {
-        const monthMap: Record<string, string> = {
-          jan: "01", feb: "02", mar: "03", apr: "04", may: "05", jun: "06",
-          jul: "07", aug: "08", sep: "09", oct: "10", nov: "11", dec: "12",
-        };
-        const mKey = expMatch[2].toLowerCase().slice(0, 3);
-        const mm = monthMap[mKey] || "08";
-        passExp = `${expMatch[3]}-${mm}-${expMatch[1].padStart(2, "0")}`;
-      } else if (expMatch[1] && expMatch[1].length === 4) {
-        passExp = `${expMatch[1]}-${expMatch[2].padStart(2, "0")}-${expMatch[3].padStart(2, "0")}`;
-      }
+  // 2. Passport expiry date
+  const expMatch =
+    text.match(/(?:Date\s*of\s*Expiry|Expiry\s*Date|만\s*료\s*일(?:\s*자)?|유\s*효\s*기\s*간|ថ្ងៃផុតកំណត់)[^\d]*(\d{4})[.\-\s년/]+(\d{1,2})[.\-\s월/]+(\d{1,2})/i) ||
+    text.match(/(?:Date\s*of\s*Expiry|Expiry)[^\d]*(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})/i);
+  if (expMatch) {
+    if (expMatch[3] && expMatch[3].length === 4) {
+      const monthMap: Record<string, string> = {
+        jan: "01", feb: "02", mar: "03", apr: "04", may: "05", jun: "06",
+        jul: "07", aug: "08", sep: "09", oct: "10", nov: "11", dec: "12",
+      };
+      const mKey = expMatch[2].toLowerCase().slice(0, 3);
+      const mm = monthMap[mKey] || "08";
+      passExp = `${expMatch[3]}-${mm}-${expMatch[1].padStart(2, "0")}`;
+    } else if (expMatch[1] && expMatch[1].length === 4) {
+      passExp = `${expMatch[1]}-${expMatch[2].padStart(2, "0")}-${expMatch[3].padStart(2, "0")}`;
     }
   }
 
   return {
-    passportNo: passNo || defaultVal.passportNo,
-    passportExpiry: passExp || defaultVal.passportExpiry,
+    passportNo: passNo,
+    passportExpiry: passExp,
   };
 }

@@ -12,17 +12,19 @@ export function fileToDataUrl(file: File): Promise<string> {
       }
       const rawDataUrl = reader.result;
 
-      // Keep PDFs, SVGs, and small PNGs/JPEGs untouched if not huge camera photos
+      // Keep SVGs and PDFs untouched
       if (
-        !file.type.startsWith('image/') ||
         file.type === 'image/svg+xml' ||
-        (file.type === 'image/png' && file.size < 450 * 1024)
+        file.type === 'application/pdf' ||
+        rawDataUrl.startsWith('data:image/svg+xml') ||
+        rawDataUrl.startsWith('data:application/pdf')
       ) {
         resolve(rawDataUrl);
         return;
       }
 
-      // Normalize mobile camera photos (fixes EXIF orientation & downscales 12MP photos to crisp 1600px)
+      // Always normalize raster images (including mobile .jfif, .webp, .heic, or camera JPEGs/PNGs)
+      // through an HTML5 canvas so EXIF orientation is applied and MIME type is guaranteed to be standard image/jpeg
       const img = new Image();
       img.onload = () => {
         try {
@@ -30,7 +32,7 @@ export function fileToDataUrl(file: File): Promise<string> {
           let width = img.naturalWidth || img.width;
           let height = img.naturalHeight || img.height;
 
-          if (width <= maxDim && height <= maxDim && file.size < 800 * 1024) {
+          if (!width || !height) {
             resolve(rawDataUrl);
             return;
           }
@@ -56,7 +58,7 @@ export function fileToDataUrl(file: File): Promise<string> {
           ctx.fillStyle = '#FFFFFF';
           ctx.fillRect(0, 0, width, height);
           ctx.drawImage(img, 0, 0, width, height);
-          resolve(canvas.toDataURL('image/jpeg', 0.90));
+          resolve(canvas.toDataURL('image/jpeg', 0.92));
         } catch {
           resolve(rawDataUrl);
         }

@@ -360,33 +360,41 @@ export const Step1Upload: React.FC<Step1UploadProps> = ({
     setExtractSuccess(false);
 
     try {
-      // 1. Try Server-side Gemini OCR first (when running with backend)
+      // 1. Try Server-side Gemini OCR first (same-origin or Cloud Run API for GitHub Pages static deployment)
+      const apiEndpoints = [
+        '/api/extract-documents',
+        'https://ais-pre-6hupm32wkiwhqvn2wyhiat-657750387084.asia-northeast1.run.app/api/extract-documents',
+      ];
+
       let serverSucceeded = false;
-      try {
-        const response = await fetch('/api/extract-documents', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            arcFront: frontUrl,
-            arcBack: backUrl,
-            topikCert: topikUrl,
-            topikCertList: curDocs.topikCertList,
-            passport: passportUrl,
-          }),
-        });
+      for (const endpoint of apiEndpoints) {
+        try {
+          const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              arcFront: frontUrl,
+              arcBack: backUrl,
+              topikCert: topikUrl,
+              topikCertList: curDocs.topikCertList,
+              passport: passportUrl,
+            }),
+          });
 
-        const resData = await response.json().catch(() => ({}));
+          if (!response.ok) continue;
+          const resData = await response.json().catch(() => ({}));
 
-        if (response.ok && resData.success && resData.data && !resData.fallbackMode) {
-          const ext = resData.data;
-          setFormData((prev) => mergeExtractedIntoFormData(prev, ext));
-          serverSucceeded = true;
-          setExtractSuccess(true);
-          setTimeout(() => setExtractSuccess(false), 8000);
-          return;
+          if (resData.success && resData.data && !resData.fallbackMode) {
+            const ext = resData.data;
+            setFormData((prev) => mergeExtractedIntoFormData(prev, ext));
+            serverSucceeded = true;
+            setExtractSuccess(true);
+            setTimeout(() => setExtractSuccess(false), 8000);
+            return;
+          }
+        } catch {
+          // Try next endpoint or proceed to client-side OCR
         }
-      } catch {
-        // Static hosting (GitHub Pages) - proceed to client-side OCR
       }
 
       if (!serverSucceeded) {

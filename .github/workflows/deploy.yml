@@ -21,12 +21,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Prepare production build in dist
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies and build production bundle
         run: |
-          mkdir -p ./dist
-          if [ -d "./docs" ] && [ -f "./docs/index.html" ]; then
-            cp -r ./docs/* ./dist/
-          fi
+          npm install --legacy-peer-deps || npm install
+          npm run build
           touch ./dist/.nojekyll
           if [ -f "./dist/index.html" ]; then
             cp ./dist/index.html ./dist/404.html

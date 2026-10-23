@@ -406,33 +406,41 @@ export const Step2FormTemplate: React.FC<Step2FormTemplateProps> = ({
     }
 
     try {
-      let extractedFromServer = false;
-      try {
-        const response = await fetch('/api/extract-documents', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            arcFront: frontToUse,
-            arcBack: backToUse,
-            topikCert: firstTopik,
-            topikCertList: firstTopik && docs.topikCertList.length === 0 ? [{ id: 'quick', dataUrl: firstTopik, name: 'TOPIK Score Report' }] : docs.topikCertList,
-            passport: docs.passportList[0]?.dataUrl || null,
-          }),
-        });
+      const apiEndpoints = [
+        '/api/extract-documents',
+        'https://ais-pre-6hupm32wkiwhqvn2wyhiat-657750387084.asia-northeast1.run.app/api/extract-documents',
+      ];
 
-        if (response.ok) {
-          const resData = await response.json().catch(() => ({}));
-          if (resData && resData.data && !resData.fallbackMode) {
-            const ext = resData.data;
-            setFormData((prev) => mergeExtractedIntoFormData(prev, ext));
-            extractedFromServer = true;
-            setExtractSuccess(true);
-            setExtractSuccessMsg('✓ បានបំពេញ និងផ្ទៀងផ្ទាត់ពាក្យសុំ (신청서 작성) ដោយស្វ័យប្រវត្តិជោគជ័យ ១០០%!');
-            setTimeout(() => setExtractSuccess(false), 9000);
+      let extractedFromServer = false;
+      for (const endpoint of apiEndpoints) {
+        try {
+          const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              arcFront: frontToUse,
+              arcBack: backToUse,
+              topikCert: firstTopik,
+              topikCertList: firstTopik && docs.topikCertList.length === 0 ? [{ id: 'quick', dataUrl: firstTopik, name: 'TOPIK Score Report' }] : docs.topikCertList,
+              passport: docs.passportList[0]?.dataUrl || null,
+            }),
+          });
+
+          if (response.ok) {
+            const resData = await response.json().catch(() => ({}));
+            if (resData && resData.data && !resData.fallbackMode) {
+              const ext = resData.data;
+              setFormData((prev) => mergeExtractedIntoFormData(prev, ext));
+              extractedFromServer = true;
+              setExtractSuccess(true);
+              setExtractSuccessMsg('✓ បានបំពេញ និងផ្ទៀងផ្ទាត់ពាក្យសុំ (신청서 작성) ដោយស្វ័យប្រវត្តិជោគជ័យ ១០០%!');
+              setTimeout(() => setExtractSuccess(false), 9000);
+              break;
+            }
           }
+        } catch {
+          // Try next endpoint or run browser OCR below
         }
-      } catch {
-        // Server endpoint unreachable (e.g. GitHub Pages static deployment) -> run browser OCR below
       }
 
       if (!extractedFromServer) {
