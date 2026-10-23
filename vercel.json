@@ -1,7 +1,6 @@
 {
-  "buildCommand": "npx vite build",
+  "buildCommand": "echo 'Using prebuilt dist'",
   "outputDirectory": "dist",
-  "framework": "vite",
   "rewrites": [
     { "source": "/(.*)", "destination": "/index.html" }
   ]
