@@ -508,18 +508,34 @@ export const Step2FormTemplate: React.FC<Step2FormTemplateProps> = ({
   useEffect(() => {
     if (docs.passportList && docs.passportList.length > 0 && (!formData.passportNo || !formData.passportExpiry)) {
       const parsed = parsePassportTextOrSvg(docs.passportList[0]?.dataUrl);
-      setFormData((prev) => ({
-        ...prev,
-        passportNo: prev.passportNo || parsed.passportNo || "N01847291",
-        passportExpiry: prev.passportExpiry || parsed.passportExpiry || "2031-08-15",
-      }));
+      if (parsed.passportNo || parsed.passportExpiry) {
+        setFormData((prev) => ({
+          ...prev,
+          passportNo: prev.passportNo || parsed.passportNo || "",
+          passportExpiry: prev.passportExpiry || parsed.passportExpiry || "",
+        }));
+      }
     }
   }, [docs.passportList]);
 
-  // Run auto-fill & verification automatically on mount
+  // Run auto-fill & verification automatically on mount or if documents are uploaded and form still has placeholders
   useEffect(() => {
-    handleExtractWithAi();
-  }, []);
+    const hasUploadedDocs = Boolean(
+      docs.arcFront ||
+      docs.arcBack ||
+      docs.topikCertList.length > 0 ||
+      docs.passportList.length > 0
+    );
+    const needsExtraction =
+      !formData.name ||
+      formData.name === '0000 0000' ||
+      formData.regNumber1 === '000000' ||
+      formData.examNumber === '0000000000000';
+
+    if (hasUploadedDocs && needsExtraction) {
+      handleExtractWithAi();
+    }
+  }, [docs.arcFront, docs.arcBack, docs.topikCertList.length, docs.passportList.length]);
 
   const matchedOffice = findOfficeByAddress(formData.address);
   const chiefTitle = matchedOffice

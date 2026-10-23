@@ -332,6 +332,11 @@ export const Step1Upload: React.FC<Step1UploadProps> = ({
     }
   };
 
+  const docsRef = useRef<UploadedDocuments>(docs);
+  useEffect(() => {
+    docsRef.current = docs;
+  }, [docs]);
+
   // Auto-extract documents using Server AI or Client-Side Tesseract OCR (for GitHub Pages / static hosting)
   const handleExtractDocuments = async (
     customTopikUrl?: string,
@@ -339,10 +344,11 @@ export const Step1Upload: React.FC<Step1UploadProps> = ({
     customArcBack?: string | null,
     customPassportUrl?: string | null
   ) => {
-    const topikUrl = customTopikUrl !== undefined ? customTopikUrl : docs.topikCertList[0]?.dataUrl;
-    const frontUrl = customArcFront !== undefined ? customArcFront : docs.arcFront;
-    const backUrl = customArcBack !== undefined ? customArcBack : docs.arcBack;
-    const passportUrl = customPassportUrl !== undefined ? customPassportUrl : docs.passportList[0]?.dataUrl;
+    const curDocs = docsRef.current;
+    const topikUrl = customTopikUrl !== undefined ? customTopikUrl : curDocs.topikCertList[0]?.dataUrl;
+    const frontUrl = customArcFront !== undefined ? customArcFront : curDocs.arcFront;
+    const backUrl = customArcBack !== undefined ? customArcBack : curDocs.arcBack;
+    const passportUrl = customPassportUrl !== undefined ? customPassportUrl : curDocs.passportList[0]?.dataUrl;
 
     if (!topikUrl && !frontUrl && !backUrl && !passportUrl) {
       setExtractError('សូមបញ្ចូលសញ្ញាបត្រ TOPIK ឬកាត ARC ជាមុនសិន!');
@@ -364,7 +370,7 @@ export const Step1Upload: React.FC<Step1UploadProps> = ({
             arcFront: frontUrl,
             arcBack: backUrl,
             topikCert: topikUrl,
-            topikCertList: docs.topikCertList,
+            topikCertList: curDocs.topikCertList,
             passport: passportUrl,
           }),
         });
@@ -430,11 +436,15 @@ export const Step1Upload: React.FC<Step1UploadProps> = ({
     try {
       const dataUrl = await fileToDataUrl(file);
       if (side === 'front') {
-        setDocs((prev) => ({ ...prev, arcFront: dataUrl, arcFrontName: file.name }));
-        handleExtractDocuments(undefined, dataUrl, docs.arcBack);
+        const nextDocs = { ...docsRef.current, arcFront: dataUrl, arcFrontName: file.name };
+        docsRef.current = nextDocs;
+        setDocs(nextDocs);
+        handleExtractDocuments(undefined, dataUrl, nextDocs.arcBack, nextDocs.passportList[0]?.dataUrl);
       } else {
-        setDocs((prev) => ({ ...prev, arcBack: dataUrl, arcBackName: file.name }));
-        handleExtractDocuments(undefined, docs.arcFront, dataUrl);
+        const nextDocs = { ...docsRef.current, arcBack: dataUrl, arcBackName: file.name };
+        docsRef.current = nextDocs;
+        setDocs(nextDocs);
+        handleExtractDocuments(undefined, nextDocs.arcFront, dataUrl, nextDocs.passportList[0]?.dataUrl);
       }
     } catch (err) {
       console.error('File read error:', err);
@@ -453,12 +463,14 @@ export const Step1Upload: React.FC<Step1UploadProps> = ({
           name: file.name,
         }))
       );
-      setDocs((prev) => ({
-        ...prev,
-        passportList: [...prev.passportList, ...newItems],
-      }));
+      const nextDocs = {
+        ...docsRef.current,
+        passportList: [...docsRef.current.passportList, ...newItems],
+      };
+      docsRef.current = nextDocs;
+      setDocs(nextDocs);
       if (newItems.length > 0 && newItems[0].dataUrl) {
-        handleExtractDocuments(undefined, docs.arcFront, docs.arcBack, newItems[0].dataUrl);
+        handleExtractDocuments(undefined, nextDocs.arcFront, nextDocs.arcBack, newItems[0].dataUrl);
       }
     } catch (err) {
       console.error('Passport read error:', err);
@@ -477,14 +489,16 @@ export const Step1Upload: React.FC<Step1UploadProps> = ({
           name: file.name,
         }))
       );
-      setDocs((prev) => ({
-        ...prev,
-        topikCertList: [...prev.topikCertList, ...newItems],
-      }));
+      const nextDocs = {
+        ...docsRef.current,
+        topikCertList: [...docsRef.current.topikCertList, ...newItems],
+      };
+      docsRef.current = nextDocs;
+      setDocs(nextDocs);
 
       // Trigger automatic extraction of TOPIK details
       if (newItems[0]?.dataUrl) {
-        handleExtractDocuments(newItems[0].dataUrl);
+        handleExtractDocuments(newItems[0].dataUrl, nextDocs.arcFront, nextDocs.arcBack, nextDocs.passportList[0]?.dataUrl);
       }
     } catch (err) {
       console.error('TOPIK read error:', err);
@@ -872,6 +886,136 @@ export const Step1Upload: React.FC<Step1UploadProps> = ({
           )}
         </div>
 
+        {/* Auto-Extracted Applicant Info Card (ARC & Passport) */}
+        {(docs.arcFront || docs.arcBack || docs.passportList.length > 0) && (
+          <div className="md:col-span-2 bg-gradient-to-r from-blue-50/90 via-indigo-50/80 to-blue-50/90 p-4 sm:p-5 rounded-2xl border-2 border-blue-300 shadow-xs space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-blue-600 shrink-0" />
+                <span className="text-xs sm:text-sm font-bold text-blue-950 font-bokor">
+                  ព័ត៌មានអ្នកដាក់ពាក្យដែលចាប់បានពីកាត ARC / លិខិតឆ្លងដែន (អាចកែសម្រួលបានភ្លាមៗ)
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  handleExtractDocuments(
+                    docs.topikCertList[0]?.dataUrl,
+                    docs.arcFront,
+                    docs.arcBack,
+                    docs.passportList[0]?.dataUrl
+                  )
+                }
+                disabled={isExtractingTopik}
+                className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-xs font-bold flex items-center gap-1.5 shadow-2xs cursor-pointer transition-colors"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isExtractingTopik ? 'animate-spin' : ''}`} />
+                <span>{isExtractingTopik ? 'កំពុងស្កេន OCR...' : 'ស្កេនចាប់ព័ត៌មានម្តងទៀត'}</span>
+              </button>
+            </div>
+
+            {isExtractingTopik && (
+              <div className="flex items-center gap-2 text-xs text-blue-800 bg-white/90 px-3 py-2 rounded-xl border border-blue-200 font-semibold animate-pulse">
+                <RefreshCw className="w-4 h-4 animate-spin text-blue-600 shrink-0" />
+                <span>កំពុងស្កេនចាប់ឈ្មោះ លេខកាត ARC និងអាសយដ្ឋានដោយស្វ័យប្រវត្តិ សូមរង់ចាំបន្តិច...</span>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 bg-white p-3.5 rounded-xl border border-blue-200">
+              {/* Applicant Full Name */}
+              <div className="space-y-1">
+                <label className="block text-[11px] font-bold text-slate-600">
+                  ឈ្មោះពេញ (성명 / Name in English):
+                </label>
+                <input
+                  type="text"
+                  value={formData.name === '0000 0000' ? '' : formData.name}
+                  placeholder={isExtractingTopik ? 'កំពុងស្កេនឈ្មោះ...' : 'ឧ. EANG VEASNA'}
+                  onChange={(e) => {
+                    const val = e.target.value.toUpperCase();
+                    setFormData((prev) => ({
+                      ...prev,
+                      name: val,
+                      applicantName: val,
+                    }));
+                  }}
+                  className="w-full px-2.5 py-1.5 text-xs font-bold text-slate-900 uppercase bg-slate-50 border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:bg-white"
+                />
+              </div>
+
+              {/* ARC Number */}
+              <div className="space-y-1">
+                <label className="block text-[11px] font-bold text-slate-600">
+                  លេខកាត ARC (외국인등록번호 13 ខ្ទង់):
+                </label>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="text"
+                    maxLength={6}
+                    value={formData.regNumber1 === '000000' ? '' : formData.regNumber1}
+                    placeholder="YYMMDD"
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/[^0-9]/g, '').slice(0, 6);
+                      setFormData((prev) => ({ ...prev, regNumber1: val }));
+                    }}
+                    className="w-full px-2 py-1.5 text-xs font-mono font-bold text-slate-900 text-center bg-slate-50 border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:bg-white"
+                  />
+                  <span className="text-slate-400 font-bold">-</span>
+                  <input
+                    type="text"
+                    maxLength={7}
+                    value={formData.regNumber2 === '0000000' ? '' : formData.regNumber2}
+                    placeholder="5XXXXXX"
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/[^0-9]/g, '').slice(0, 7);
+                      const firstDigit = val.charAt(0);
+                      const gender = ['2', '4', '6', '8'].includes(firstDigit)
+                        ? '여'
+                        : ['1', '3', '5', '7'].includes(firstDigit)
+                        ? '남'
+                        : formData.gender;
+                      setFormData((prev) => ({ ...prev, regNumber2: val, gender }));
+                    }}
+                    className="w-full px-2 py-1.5 text-xs font-mono font-bold text-slate-900 text-center bg-slate-50 border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:bg-white"
+                  />
+                </div>
+              </div>
+
+              {/* Visa Status */}
+              <div className="space-y-1">
+                <label className="block text-[11px] font-bold text-slate-600">
+                  ប្រភេទទិដ្ឋាការ (체류자격 / Visa):
+                </label>
+                <input
+                  type="text"
+                  value={formData.visaStatus || ''}
+                  placeholder="E-9-1"
+                  onChange={(e) =>
+                    setFormData((prev) => ({ ...prev, visaStatus: e.target.value.toUpperCase() }))
+                  }
+                  className="w-full px-2.5 py-1.5 text-xs font-bold text-slate-900 uppercase bg-slate-50 border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:bg-white"
+                />
+              </div>
+
+              {/* Address on ARC Back */}
+              <div className="space-y-1">
+                <label className="block text-[11px] font-bold text-slate-600">
+                  អាសយដ្ឋានលើកាត (체류지):
+                </label>
+                <input
+                  type="text"
+                  value={formData.address.startsWith('00000') ? '' : formData.address}
+                  placeholder={isExtractingTopik ? 'កំពុងស្កេនអាសយដ្ឋាន...' : 'អាសយដ្ឋាននៅកូរ៉េ'}
+                  onChange={(e) =>
+                    setFormData((prev) => ({ ...prev, address: e.target.value }))
+                  }
+                  className="w-full px-2.5 py-1.5 text-xs font-bold text-slate-900 bg-slate-50 border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:bg-white"
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Slot 3: TOPIK Score Certificate with Auto-Extraction Display */}
         <div id="slot-topik-cert" className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-3 transition-all scroll-mt-24">
           <div className="flex items-center justify-between">
@@ -960,28 +1104,28 @@ export const Step1Upload: React.FC<Step1UploadProps> = ({
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-[11px] bg-white p-2.5 rounded-lg border border-emerald-200">
                   <div>
                     <span className="text-slate-500 block">회차 (លើកទី/ជុំ):</span>
-                    <strong className="text-slate-900 text-xs">{formData.round ? `${formData.round} 회` : '107 회'}</strong>
+                    <strong className="text-slate-900 text-xs">{formData.round && formData.round !== '000' ? `${formData.round} 회` : (isExtractingTopik ? 'កំពុងស្កេន...' : '-')}</strong>
                   </div>
                   <div>
                     <span className="text-slate-500 block">수험번호 (លេខកូដ):</span>
-                    <strong className="text-slate-900 text-xs font-mono">{formData.examNumber || '0010197000017'}</strong>
+                    <strong className="text-slate-900 text-xs font-mono">{formData.examNumber && formData.examNumber !== '0000000000000' ? formData.examNumber : (isExtractingTopik ? 'កំពុងស្កេន...' : '-')}</strong>
                   </div>
                   <div>
                     <span className="text-slate-500 block">시험일 (ថ្ងៃប្រឡង):</span>
-                    <strong className="text-slate-900 text-xs">{formData.examDate || '2026-07-05'}</strong>
+                    <strong className="text-slate-900 text-xs">{formData.examDate && formData.examDate !== '0000-00-00' ? formData.examDate : (isExtractingTopik ? 'កំពុងស្កេន...' : '-')}</strong>
                   </div>
                   <div>
                     <span className="text-slate-500 block">성적유효기간 (សុពលភាព):</span>
-                    <strong className="text-rose-600 text-xs">{formData.validUntil || '2028-08-12'}</strong>
+                    <strong className="text-rose-600 text-xs">{formData.validUntil && formData.validUntil !== '0000-00-00' ? formData.validUntil : (isExtractingTopik ? 'កំពុងស្កេន...' : '-')}</strong>
                   </div>
                   <div>
                     <span className="text-slate-500 block">등급 (កម្រិតពិន្ទុ):</span>
-                    <strong className="text-emerald-700 text-xs">{formData.grade || '2급'}</strong>
+                    <strong className="text-emerald-700 text-xs">{formData.grade && formData.grade !== '0급' ? formData.grade : (isExtractingTopik ? 'កំពុងស្កេន...' : '-')}</strong>
                   </div>
                   <div className="col-span-2 sm:col-span-1">
                     <span className="text-slate-500 block">문서확인번호 (លេខបញ្ជាក់):</span>
                     <strong className="text-blue-700 font-mono text-[10.5px]">
-                      {formData.docVerificationNo.join('-')}
+                      {formData.docVerificationNo.join('-') !== '0000-0000-0000-0000' ? formData.docVerificationNo.join('-') : (isExtractingTopik ? 'កំពុងស្កេន...' : '-')}
                     </strong>
                   </div>
                 </div>

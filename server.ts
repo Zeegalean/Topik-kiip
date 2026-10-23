@@ -58,69 +58,38 @@ function isTransientError(err: any): boolean {
   );
 }
 
-// Helper to sanitize extracted OCR data from any source
+// Helper to sanitize extracted OCR data from any source (ONLY cleans present fields, never injects fake defaults)
 function sanitizeExtractedData(raw: any): Record<string, any> {
-  const result: Record<string, any> = { ...raw };
+  const result: Record<string, any> = {};
 
   // 1. Doc Verification Number: must be array of 4 groups of 4 digits
-  if (result.docVerificationNo) {
-    if (Array.isArray(result.docVerificationNo)) {
-      if (
-        result.docVerificationNo.length === 4 &&
-        result.docVerificationNo.every((p: any) => /^\d{1,4}$/.test(String(p).trim()))
-      ) {
-        result.docVerificationNo = result.docVerificationNo.map((p: any) =>
-          String(p).trim().padStart(4, '0')
-        );
-      } else {
-        const flat = result.docVerificationNo.map(String).join('').replace(/[^0-9]/g, '');
-        if (flat.length >= 16) {
-          result.docVerificationNo = [
-            flat.slice(0, 4),
-            flat.slice(4, 8),
-            flat.slice(8, 12),
-            flat.slice(12, 16),
-          ];
-        } else if (flat.length >= 4) {
-          const padded = flat.padEnd(16, '0');
-          result.docVerificationNo = [
-            padded.slice(0, 4),
-            padded.slice(4, 8),
-            padded.slice(8, 12),
-            padded.slice(12, 16),
-          ];
-        } else {
-          result.docVerificationNo = ['9849', '2820', '3579', '7920'];
-        }
+  if (raw?.docVerificationNo) {
+    if (Array.isArray(raw.docVerificationNo)) {
+      const flat = raw.docVerificationNo.map(String).join('').replace(/[^0-9]/g, '');
+      if (flat.length >= 16 && flat !== '0000000000000000') {
+        result.docVerificationNo = [
+          flat.slice(0, 4),
+          flat.slice(4, 8),
+          flat.slice(8, 12),
+          flat.slice(12, 16),
+        ];
       }
-    } else if (typeof result.docVerificationNo === 'string') {
-      const digits = result.docVerificationNo.replace(/[^0-9]/g, '');
-      if (digits.length >= 16) {
+    } else if (typeof raw.docVerificationNo === 'string') {
+      const digits = raw.docVerificationNo.replace(/[^0-9]/g, '');
+      if (digits.length >= 16 && digits !== '0000000000000000') {
         result.docVerificationNo = [
           digits.slice(0, 4),
           digits.slice(4, 8),
           digits.slice(8, 12),
           digits.slice(12, 16),
         ];
-      } else if (digits.length >= 4) {
-        const padded = digits.padEnd(16, '0');
-        result.docVerificationNo = [
-          padded.slice(0, 4),
-          padded.slice(4, 8),
-          padded.slice(8, 12),
-          padded.slice(12, 16),
-        ];
-      } else {
-        result.docVerificationNo = ['9849', '2820', '3579', '7920'];
       }
     }
-  } else {
-    result.docVerificationNo = ['9849', '2820', '3579', '7920'];
   }
 
   // 2. Alien Registration Numbers: 6 digits & 7 digits
-  let r1 = String(result.regNumber1 || '').replace(/[^0-9]/g, '');
-  let r2 = String(result.regNumber2 || '').replace(/[^0-9]/g, '');
+  let r1 = String(raw?.regNumber1 || '').replace(/[^0-9]/g, '');
+  let r2 = String(raw?.regNumber2 || '').replace(/[^0-9]/g, '');
   if (r1.length >= 13 && !r2) {
     r2 = r1.slice(6, 13);
     r1 = r1.slice(0, 6);
@@ -129,72 +98,100 @@ function sanitizeExtractedData(raw: any): Record<string, any> {
     r1 = r1.slice(0, 6);
   }
   if (r2.length > 7) r2 = r2.slice(0, 7);
-  result.regNumber1 = r1 || '950910';
-  result.regNumber2 = r2 || '5760023';
-
-  // Gender
-  const firstDigit = result.regNumber2.charAt(0);
-  result.gender = ['2', '4', '6', '8', '0'].includes(firstDigit) ? '여' : '남';
+  if (r1.length === 6 && r1 !== '000000') {
+    result.regNumber1 = r1;
+  }
+  if (r2.length === 7 && r2 !== '0000000') {
+    result.regNumber2 = r2;
+    const firstDigit = r2.charAt(0);
+    result.gender = ['2', '4', '6', '8', '0'].includes(firstDigit) ? '여' : '남';
+  } else if (raw?.gender === '남' || raw?.gender === '여') {
+    result.gender = raw.gender;
+  }
 
   // 3. Visa status
-  const rawVisa = String(result.visaStatus || '').trim();
-  const visaMatch =
-    rawVisa.match(/\b([A-Z]-\d{1,2}(?:-[0-9A-Z]{1,3})?)\b/i) ||
-    rawVisa.match(/([A-Z]-\d{1,2}(?:-[0-9A-Z]{1,3})?)/i) ||
-    rawVisa.match(/([A-Z]\d{1,2}(?:-[0-9A-Z]{1,3})?)/i);
-  if (visaMatch) {
-    result.visaStatus = visaMatch[1].toUpperCase();
-  } else if (rawVisa.length <= 8 && /^[A-Z0-9-]+$/i.test(rawVisa)) {
-    result.visaStatus = rawVisa.toUpperCase();
-  } else {
-    result.visaStatus = 'E-9-1';
+  const rawVisa = String(raw?.visaStatus || '').trim();
+  if (rawVisa) {
+    const visaMatch =
+      rawVisa.match(/\b([A-Z]-\d{1,2}(?:-[0-9A-Z]{1,3})?)\b/i) ||
+      rawVisa.match(/([A-Z]-\d{1,2}(?:-[0-9A-Z]{1,3})?)/i) ||
+      rawVisa.match(/([A-Z]\d{1,2}(?:-[0-9A-Z]{1,3})?)/i);
+    if (visaMatch) {
+      result.visaStatus = visaMatch[1].toUpperCase();
+    } else if (rawVisa.length <= 8 && /^[A-Z0-9-]+$/i.test(rawVisa)) {
+      result.visaStatus = rawVisa.toUpperCase();
+    }
   }
 
   // 4. Exam Number (preserve extracted digits)
-  if (result.examNumber) {
-    const rawExam = String(result.examNumber).replace(/[^0-9]/g, '');
-    result.examNumber = rawExam.length >= 4 ? rawExam : (rawExam || '0010197000017');
-  } else {
-    result.examNumber = '0010197000017';
+  if (raw?.examNumber) {
+    const rawExam = String(raw.examNumber).replace(/[^0-9]/g, '');
+    if (rawExam.length >= 6 && !/^0+$/.test(rawExam)) {
+      result.examNumber = rawExam;
+    }
   }
 
   // 5. Round (preserve extracted number)
-  if (result.round) {
-    const rawRound = String(result.round).replace(/[^0-9]/g, '');
-    result.round = rawRound || '107';
-  } else {
-    result.round = '107';
+  if (raw?.round) {
+    const rawRound = String(raw.round).replace(/[^0-9]/g, '');
+    if (rawRound && !/^0+$/.test(rawRound)) {
+      result.round = rawRound;
+    }
   }
 
   // 6. Grade
-  const gradeMatch = String(result.grade || '').match(/([1-6])\s*급?/);
-  result.grade = gradeMatch ? `${gradeMatch[1]}급` : (result.grade || '2급');
+  if (raw?.grade) {
+    const gradeMatch = String(raw.grade).match(/([1-6])\s*급?/);
+    if (gradeMatch) {
+      result.grade = `${gradeMatch[1]}급`;
+    }
+  }
 
   // 7. Name
-  if (result.name) {
-    result.name = String(result.name)
+  if (raw?.name) {
+    const cleanedName = String(raw.name)
       .replace(/(?:성명|Name|NAME)\s*[:：]?\s*/gi, '')
       .replace(/[^a-zA-Z\s가-힣]/g, ' ')
       .replace(/\s+/g, ' ')
       .trim()
       .toUpperCase();
+    if (cleanedName.length >= 2 && cleanedName !== '0000 0000') {
+      result.name = cleanedName;
+      result.applicantName = cleanedName;
+    }
   }
 
-  // 8. Passport Number (여권번호 / លេខលិខិតឆ្លងដែន)
-  if (result.passportNo) {
-    const rawPass = String(result.passportNo).replace(/[^A-Za-z0-9]/g, '').toUpperCase().trim();
+  // 8. Nationality & Address & Dates
+  if (raw?.nationality && String(raw.nationality).trim().length >= 2) {
+    result.nationality = String(raw.nationality).trim();
+  }
+  if (raw?.address && String(raw.address).trim().length >= 5 && !String(raw.address).startsWith('00000')) {
+    result.address = String(raw.address).trim();
+  }
+  if (raw?.examDate && !String(raw.examDate).startsWith('0000')) {
+    const dm = String(raw.examDate).match(/(\d{4})[.\-\s년/]+(\d{1,2})[.\-\s월/]+(\d{1,2})/);
+    if (dm) result.examDate = `${dm[1]}-${dm[2].padStart(2, '0')}-${dm[3].padStart(2, '0')}`;
+  }
+  if (raw?.validUntil && !String(raw.validUntil).startsWith('0000')) {
+    const vm = String(raw.validUntil).match(/(\d{4})[.\-\s년/]+(\d{1,2})[.\-\s월/]+(\d{1,2})/);
+    if (vm) result.validUntil = `${vm[1]}-${vm[2].padStart(2, '0')}-${vm[3].padStart(2, '0')}`;
+  }
+
+  // 9. Passport Number (여권번호 / លេខលិខិតឆ្លងដែន)
+  if (raw?.passportNo) {
+    const rawPass = String(raw.passportNo).replace(/[^A-Za-z0-9]/g, '').toUpperCase().trim();
     if (rawPass.length >= 6) {
       result.passportNo = rawPass;
     }
   }
 
-  // 9. Passport Expiry Date (여권 유효기간 / ថ្ងៃខែផុតកំណត់)
-  if (result.passportExpiry) {
-    const rawExp = String(result.passportExpiry).trim();
+  // 10. Passport Expiry Date (여권 유효기간 / ថ្ងៃខែផុតកំណត់)
+  if (raw?.passportExpiry) {
+    const rawExp = String(raw.passportExpiry).trim();
     const dateMatch = rawExp.match(/(\d{4})[.\-\s년/]+(\d{1,2})[.\-\s월/]+(\d{1,2})/);
     if (dateMatch) {
       result.passportExpiry = `${dateMatch[1]}-${dateMatch[2].padStart(2, "0")}-${dateMatch[3].padStart(2, "0")}`;
-    } else {
+    } else if (rawExp && !rawExp.startsWith('0000')) {
       result.passportExpiry = rawExp;
     }
   }
@@ -538,51 +535,28 @@ app.post('/api/extract-documents', async (req, res) => {
 
     const extractionPrompt = `
 You are an expert OCR and legal document analyst for Korea Immigration Service (출입국관리사무소) and TOPIK (국립국제교육원 한국어능력시험).
-Analyze the provided images of Alien Registration Card (외국인등록증) and TOPIK score certificate (한국어능력시험 성적증명서).
+Analyze the provided images of Alien Registration Card (외국인등록증), Passport (여권), and TOPIK score certificate (한국어능력시험 성적증명서).
+
+IMPORTANT RULE: ONLY extract values that are ACTUALLY VISIBLE in the provided images. If a specific document or field is not present in the uploaded images, return an empty string "" (or empty array [] for docVerificationNo). NEVER invent, guess, or output placeholder values.
+
+CRITICAL INSTRUCTIONS FOR ALIEN REGISTRATION CARD (외국인등록증) & PASSPORT (여권):
+1. name: Full English name in uppercase exactly as printed on the Alien Registration Card ("성명" / "Name"), Passport ("Surname" + "Given Names" or MRZ line), or TOPIK certificate ("성명 / Name in English").
+2. regNumber1: 외국인등록번호 front 6 digits (birth date YYMMDD).
+3. regNumber2: 외국인등록번호 back 7 digits.
+4. gender: "남" (Male) or "여" (Female).
+5. nationality: Country/region name in English as printed on the card or passport.
+6. visaStatus: 체류자격 Visa code if visible on the card.
+7. address: Latest Korean residence address on the back of the card (체류지), choosing the row with the most recent report date (신고일) or bottom-most entry.
+8. passportNo: Passport Number (여권번호 / Passport No.) if a passport is uploaded.
+9. passportExpiry: Passport Date of Expiry formatted as YYYY-MM-DD.
 
 CRITICAL INSTRUCTIONS FOR TOPIK SCORE CERTIFICATE (한국어능력시험 성적증명서):
-You MUST search the TOPIK certificate carefully for these specific fields:
-
-1. 문서확인번호 (Document Verification Number):
-   - Location: Top-right header of the certificate, or near the 2D barcode / QR code.
-   - Format: Exactly 16 digits, typically displayed as 4 groups of 4 digits separated by dashes or spaces (e.g. 9849-2820-3579-7920 or 9849 2820 3579 7920 or 16 continuous digits).
-   - Label: "문서확인번호", "문서확인번호(16자리)", "발급확인번호", or "Verification No.".
-   - Return as an array of exactly 4 strings with 4 digits each: ["9849", "2820", "3579", "7920"].
-
-2. 수험번호 (Examination Registration Number / Application No.):
-   - Location: In the table header/row titled "수 험 번 호", "수험번호", "Registration No.", or "Application No.".
-   - Format: 10 to 16 numeric digits (e.g. "0010197000017").
-   - Extract the full number string.
-
-3. 회차 (Test Round / Test Held):
-   - Location: In the document title e.g. "제107회 한국어능력시험 성적증명서", OR in the table under "회    차", "회  차", "회차", or "Test Held".
-   - Format: Numeric round only (e.g. if it says "제107회" or "107회", return "107").
-
-4. 시험일자 (Test Date):
-   - Look under "시험일자", "시험일", or "Test Date". Format YYYY-MM-DD (e.g. "2026-07-05").
-
-5. 성적유효기간 (Valid Until):
-   - Look under "성적유효기간", "유효기간", or "Valid Until". Format YYYY-MM-DD (e.g. "2028-08-12").
-
-6. 등급 (Grade):
-   - Look under "등급", "취득등급", or "Grade". (e.g. "1급", "2급", "3급", "4급", "5급", "6급").
-
-CRITICAL INSTRUCTIONS FOR PASSPORT (여권 / Passport):
-1. passportNo: Search the Passport info page carefully for the Passport Number (여권번호 / លេខលិខិតឆ្លងដែន).
-   - Usually at the top-right header, or labeled "Passport No.", "여권번호", or in the MRZ line at the bottom.
-   - Typically 8 to 9 alphanumeric characters starting with a letter (e.g. "N01847291", "M12345678", etc.).
-2. passportExpiry: Search for the Date of Expiry / Expiry Date (유효기간 / 기간만료일).
-   - Look for "Date of Expiry", "Expiry Date", "만료일자", "기간만료일", "유효기간".
-   - Format strictly as YYYY-MM-DD (e.g. "2031-08-15").
-
-CRITICAL INSTRUCTIONS FOR ALIEN REGISTRATION CARD (외국인등록증):
-1. name: Full English/Korean name uppercase as printed (e.g. "SOK SRORNG")
-2. regNumber1: 외국인등록번호 front 6 digits (birth date YYMMDD)
-3. regNumber2: 외국인등록번호 back 7 digits
-4. gender: "남" (Male) or "여" (Female)
-5. nationality: Country name in English (e.g. "Cambodia", "Vietnam", "Uzbekistan", "China", "Nepal", etc.)
-6. visaStatus: 체류자격 Visa code if visible (e.g. "E-9-1", "E-7-4", "E-7-1", "D-2-1", "F-2-R", etc.)
-7. address: Korean address on back of card (체류지)
+1. docVerificationNo: 문서확인번호 (16 digits at top-right header, returned as array of 4 strings of 4 digits each).
+2. examNumber: 수험번호 (10 to 16 numeric digits in the table).
+3. round: 회차 numeric round only.
+4. examDate: 시험일자 formatted as YYYY-MM-DD.
+5. validUntil: 성적유효기간 formatted as YYYY-MM-DD.
+6. grade: 등급 (1급, 2급, 3급, 4급, 5급, or 6급).
 
 Return ONLY structured JSON according to the schema.
 `;
@@ -591,7 +565,6 @@ Return ONLY structured JSON according to the schema.
 
     // Multi-model resilience: try fast and high-availability gemini-3.1-flash-lite first, then gemini-3.8-flash
     const candidateModels = ['gemini-3.1-flash-lite', 'gemini-3.8-flash'];
-    let lastError: any = null;
     let extractedData: any = null;
     let successfulModel = '';
 
@@ -606,28 +579,28 @@ Return ONLY structured JSON according to the schema.
             responseSchema: {
               type: Type.OBJECT,
               properties: {
-                name: { type: Type.STRING },
-                regNumber1: { type: Type.STRING },
-                regNumber2: { type: Type.STRING },
+                name: { type: Type.STRING, description: "Applicant full English name in uppercase if visible in the image, otherwise empty string" },
+                regNumber1: { type: Type.STRING, description: "6-digit birth date part of ARC number if visible, otherwise empty string" },
+                regNumber2: { type: Type.STRING, description: "7-digit back part of ARC number if visible, otherwise empty string" },
                 gender: { type: Type.STRING },
                 nationality: { type: Type.STRING },
                 visaStatus: { type: Type.STRING },
                 address: { 
                   type: Type.STRING,
-                  description: "LATEST residence address (체류지 주소) from the back of the card, determined by the most recent report date (신고일 / 신고일자) or the bottom-most entered row in the 체류지 변경사항 table. Never return older expired addresses.",
+                  description: "LATEST residence address (체류지 주소) from the back of the card, determined by the most recent report date (신고일 / 신고일자) or the bottom-most entered row in the 체류지 변경사항 table.",
                 },
                 docVerificationNo: {
                   type: Type.ARRAY,
                   items: { type: Type.STRING },
-                  description: "문서확인번호: 4 groups of 4 digits or 16 continuous digits, e.g. ['9849', '2820', '3579', '7920']",
+                  description: "문서확인번호: 4 groups of 4 digits if visible on TOPIK certificate",
                 },
-                examNumber: { type: Type.STRING, description: "수험번호 (수 험 번 호) digits e.g. '0010197000017'" },
+                examNumber: { type: Type.STRING, description: "수험번호 digits if visible on TOPIK certificate" },
                 examDate: { type: Type.STRING, description: "YYYY-MM-DD" },
-                round: { type: Type.STRING, description: "회차 (회    차) numeric only e.g. '107'" },
+                round: { type: Type.STRING, description: "회차 numeric only" },
                 validUntil: { type: Type.STRING, description: "YYYY-MM-DD" },
-                grade: { type: Type.STRING, description: "등급 e.g. '2급'" },
-                passportNo: { type: Type.STRING, description: "Passport Number (여권번호 / លេខលិខិតឆ្លងដែន), e.g. 'N01847291' or 'M12345678'" },
-                passportExpiry: { type: Type.STRING, description: "Passport Expiry Date (여권 유효기간 / ថ្ងៃខែផុតកំណត់), format YYYY-MM-DD e.g. '2031-08-15'" },
+                grade: { type: Type.STRING, description: "등급 (1급~6급)" },
+                passportNo: { type: Type.STRING, description: "Passport Number if visible" },
+                passportExpiry: { type: Type.STRING, description: "Passport Expiry Date YYYY-MM-DD if visible" },
               },
             },
           },
@@ -646,74 +619,55 @@ Return ONLY structured JSON according to the schema.
           break;
         }
       } catch (err: any) {
-        lastError = err;
         const errMsg = typeof err?.message === 'string' ? err.message : JSON.stringify(err || '');
         console.warn(`[OCR] Model '${model}' failed: ${errMsg}`);
 
-        // If rate limit 429 / quota exceeded, break immediately and use smart fallback
         if (errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('quota') || err?.status === 429) {
-          console.warn(`[OCR] Model '${model}' hit quota limit (429). Using guaranteed smart extraction engine.`);
+          console.warn(`[OCR] Model '${model}' hit quota limit (429). Proceeding to client/structural OCR.`);
           break;
         }
       }
     }
 
     if (extractedData) {
-      return res.json({
-        success: true,
-        data: sanitizeExtractedData(extractedData),
-        model: successfulModel,
-      });
+      const sanitized = sanitizeExtractedData(extractedData);
+      if (Object.keys(sanitized).length > 0) {
+        return res.json({
+          success: true,
+          data: sanitized,
+          model: successfulModel,
+        });
+      }
     }
 
-    // High demand / Quota fallback: If Gemini models are experiencing 503/429, extract from text or SVG content
+    // If uploaded documents were SVG/text representations, parse them directly
     if (textRepresentations.length > 0) {
       const combinedCorpus = textRepresentations.join('\n');
       const fallbackResult = extractFromSvgOrText(combinedCorpus);
-      if (fallbackResult.name || fallbackResult.regNumber1 || fallbackResult.examNumber || fallbackResult.docVerificationNo) {
-        console.log('[OCR] Successfully recovered document data via structural text parser fallback.');
+      const sanitizedFallback = sanitizeExtractedData(fallbackResult);
+      if (Object.keys(sanitizedFallback).length > 0) {
+        console.log('[OCR] Successfully recovered document data via structural text parser.');
         return res.json({
           success: true,
-          data: sanitizeExtractedData({
-            ...smartDefault,
-            ...fallbackResult,
-          }),
-          fallbackMode: true,
+          data: sanitizedFallback,
+          fallbackMode: false,
           notice: 'ទិន្នន័យត្រូវបានទាញយកដោយស្វ័យប្រវត្តិតាមរយៈម៉ាស៊ីនវិភាគឯកសារ (SVG/Text Parser Engine)។',
         });
       }
     }
 
-    // Always succeed with smart guaranteed defaults so user is never blocked or shown an error
-    console.log('[OCR] Returning smart verified extraction defaults.');
+    // Signal client to run in-browser Tesseract OCR on the actual uploaded image files
     return res.json({
-      success: true,
-      data: sanitizeExtractedData(smartDefault),
+      success: false,
       fallbackMode: true,
-      notice: 'ទិន្នន័យត្រូវបានទាញយក និងផ្ទៀងផ្ទាត់ដោយស្វ័យប្រវត្តិជោគជ័យ ១០០% (Smart Engine)!',
+      notice: 'Using client-side OCR engine for direct image scanning.',
     });
   } catch (error: any) {
     console.error('Unexpected error during document extraction:', error);
-    // Never fail the user: return verified defaults
     return res.json({
-      success: true,
-      data: sanitizeExtractedData({
-        name: 'SOK SRORNG',
-        regNumber1: '950910',
-        regNumber2: '5760023',
-        gender: '남',
-        nationality: 'Cambodia',
-        visaStatus: 'E-9-1',
-        address: '충청남도 서산시 수석산업로 85-9 (수석동)',
-        docVerificationNo: ['9849', '2820', '3579', '7920'],
-        examNumber: '0010197000017',
-        examDate: '2026-07-05',
-        round: '107',
-        validUntil: '2028-08-12',
-        grade: '2급',
-      }),
+      success: false,
       fallbackMode: true,
-      notice: 'ទិន្នន័យត្រូវបានផ្ទៀងផ្ទាត់ និងបំពេញដោយស្វ័យប្រវត្តិរួចរាល់។',
+      notice: 'Using client-side OCR engine.',
     });
   }
 });

@@ -28,26 +28,32 @@ export interface ExtractedDocumentData {
   grade?: string | null;
 }
 
+// In-memory cache so mobile browsers never re-run WASM OCR on the same uploaded image twice
+const ocrTextCache = new Map<string, string>();
+
 // Words commonly printed on ARC / Passport / TOPIK headers that are NOT applicant names
 const NON_NAME_WORDS = new Set([
   'REPUBLIC', 'OF', 'KOREA', 'FOREIGN', 'NATIONAL', 'RESIDENCE', 'CARD',
-  'ALIEN', 'REGISTRATION', 'CERTIFICATE', 'MINISTRY', 'JUSTICE', 'NAME',
-  'SEX', 'COUNTRY', 'REGION', 'STATUS', 'ISSUE', 'DATE', 'ISSUED', 'BY',
-  'EXPIRY', 'PASSPORT', 'TYPE', 'CODE', 'SURNAME', 'GIVEN', 'NAMES',
-  'NATIONALITY', 'BIRTH', 'PLACE', 'AUTHORITY', 'HOLDER', 'SIGNATURE',
-  'KINGDOM', 'CAMBODIA', 'VIETNAM', 'NEPAL', 'UZBEKISTAN', 'MYANMAR',
-  'THAILAND', 'INDONESIA', 'PHILIPPINES', 'CHINA', 'MONGOLIA', 'LANKA',
-  'BANGLADESH', 'PAKISTAN', 'TEST', 'PROFICIENCY', 'IN', 'KOREAN',
-  'TOPIK', 'SCORE', 'REPORT', 'INSTITUTE', 'INTERNATIONAL',
-  'EDUCATION', 'LEVEL', 'TOTAL', 'POINTS', 'GRADE', 'VALID', 'UNTIL',
-  'APPLICATION', 'NUMBER', 'VERIFICATION', 'DOCUMENT', 'IMMIGRATION',
-  'SERVICE', 'OFFICE', 'CHIEF', 'MALE', 'FEMALE', 'KHM', 'VNM', 'NPL',
-  'UZB', 'MMR', 'THA', 'IDN', 'PHL', 'CHN', 'MNG', 'LKA', 'NO', 'REG'
+  'RESIDENT', 'ALIEN', 'REGISTRATION', 'CERTIFICATE', 'MINISTRY', 'JUSTICE',
+  'NAME', 'IN', 'ENGLISH', 'SEX', 'COUNTRY', 'REGION', 'STATUS', 'ISSUE',
+  'DATE', 'ISSUED', 'BY', 'EXPIRY', 'PASSPORT', 'TYPE', 'CODE', 'SURNAME',
+  'GIVEN', 'NAMES', 'NATIONALITY', 'BIRTH', 'PLACE', 'AUTHORITY', 'HOLDER',
+  'SIGNATURE', 'KINGDOM', 'CAMBODIA', 'VIETNAM', 'NEPAL', 'UZBEKISTAN',
+  'MYANMAR', 'THAILAND', 'INDONESIA', 'PHILIPPINES', 'CHINA', 'MONGOLIA',
+  'LANKA', 'SRI', 'BANGLADESH', 'PAKISTAN', 'TEST', 'PROFICIENCY', 'KOREAN',
+  'TOPIK', 'SCORE', 'REPORT', 'INSTITUTE', 'INTERNATIONAL', 'EDUCATION',
+  'LEVEL', 'TOTAL', 'POINTS', 'GRADE', 'VALID', 'UNTIL', 'APPLICATION',
+  'NUMBER', 'VERIFICATION', 'DOCUMENT', 'IMMIGRATION', 'SERVICE', 'OFFICE',
+  'CHIEF', 'BRANCH', 'MALE', 'FEMALE', 'KHM', 'VNM', 'NPL', 'UZB', 'MMR',
+  'THA', 'IDN', 'PHL', 'CHN', 'MNG', 'LKA', 'NO', 'REG', 'THE', 'AND', 'FOR',
+  'WITH', 'FROM', 'THIS', 'THAT', 'PERMIT', 'VISA', 'WORK', 'EMPLOYMENT',
+  'QUALIFICATION', 'PERIOD', 'STAY', 'ADDRESS', 'CHANGE', 'REPORTED'
 ]);
 
 /**
- * Preprocess image on an HTML5 canvas to improve OCR speed and accuracy.
- * Converts colored security card backgrounds into clean white while sharpening dark text.
+ * Smooth percentile auto-level preprocessing on an HTML5 canvas.
+ * Removes indoor camera shadow/lighting cast while keeping anti-aliased letter edges intact
+ * for Tesseract's internal Sauvola adaptive local thresholding.
  */
 async function preprocessImageForOcr(dataUrl: string): Promise<string> {
   if (!dataUrl || dataUrl.startsWith('data:image/svg+xml') || dataUrl.startsWith('data:application/pdf')) {
@@ -59,7 +65,7 @@ async function preprocessImageForOcr(dataUrl: string): Promise<string> {
     img.crossOrigin = 'anonymous';
     img.onload = () => {
       try {
-        const maxDim = 1600;
+        const maxDim = 1500;
         let width = img.naturalWidth || img.width;
         let height = img.naturalHeight || img.height;
 
@@ -86,17 +92,48 @@ async function preprocessImageForOcr(dataUrl: string): Promise<string> {
         ctx.fillRect(0, 0, width, height);
         ctx.drawImage(img, 0, 0, width, height);
 
-        // Adaptive grayscale contrast boost to remove ARC card background security patterns
         const imageData = ctx.getImageData(0, 0, width, height);
         const data = imageData.data;
+
+        // Sample luminance histogram to find 5th and 92nd percentiles
+        const hist = new Uint32Array(256);
+        let sampleCount = 0;
+        for (let i = 0; i < data.length; i += 16) {
+          const lum = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+          hist[Math.min(255, Math.max(0, lum))]++;
+          sampleCount++;
+        }
+
+        let pLow = 20;
+        let pHigh = 235;
+        if (sampleCount > 0) {
+          let acc = 0;
+          for (let v = 0; v < 256; v++) {
+            acc += hist[v];
+            if (acc >= sampleCount * 0.04) {
+              pLow = v;
+              break;
+            }
+          }
+          acc = 0;
+          for (let v = 255; v >= 0; v--) {
+            acc += hist[v];
+            if (acc >= sampleCount * 0.08) {
+              pHigh = v;
+              break;
+            }
+          }
+        }
+
+        const range = Math.max(40, pHigh - pLow);
         for (let i = 0; i < data.length; i += 4) {
           const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-          let val = (lum - 128) * 1.42 + 128;
-          if (val > 218) val = 255;
-          if (val < 48) val = 0;
-          data[i] = val;
-          data[i + 1] = val;
-          data[i + 2] = val;
+          let norm = ((lum - pLow) / range) * 255;
+          if (norm > 235) norm = 255;
+          if (norm < 15) norm = 0;
+          data[i] = norm;
+          data[i + 1] = norm;
+          data[i + 2] = norm;
         }
         ctx.putImageData(imageData, 0, 0);
 
@@ -111,13 +148,19 @@ async function preprocessImageForOcr(dataUrl: string): Promise<string> {
 }
 
 /**
- * Run Tesseract.js OCR on a DataURL in the browser
+ * Run Tesseract.js OCR on a DataURL in the browser with caching
  */
 async function runBrowserOcrOnImage(
   dataUrl: string | null | undefined,
-  langSpec: string = 'kor+eng'
+  langSpec: string = 'eng'
 ): Promise<string> {
   if (!dataUrl) return '';
+
+  const cacheKey = `${langSpec}:${dataUrl.length}:${dataUrl.slice(-120)}`;
+  const cached = ocrTextCache.get(cacheKey);
+  if (cached !== undefined) {
+    return cached;
+  }
 
   // Check if SVG data URL
   if (dataUrl.startsWith('data:image/svg+xml')) {
@@ -125,10 +168,11 @@ async function runBrowserOcrOnImage(
       const commaIdx = dataUrl.indexOf(',');
       if (commaIdx !== -1) {
         const payload = dataUrl.slice(commaIdx + 1);
-        if (dataUrl.includes(';base64,')) {
-          return decodeURIComponent(escape(atob(payload)));
-        }
-        return decodeURIComponent(payload);
+        const decoded = dataUrl.includes(';base64,')
+          ? decodeURIComponent(escape(atob(payload)))
+          : decodeURIComponent(payload);
+        ocrTextCache.set(cacheKey, decoded);
+        return decoded;
       }
     } catch {
       return '';
@@ -140,7 +184,9 @@ async function runBrowserOcrOnImage(
     try {
       const base64 = dataUrl.split(';base64,')[1];
       if (base64) {
-        return atob(base64);
+        const text = atob(base64);
+        ocrTextCache.set(cacheKey, text);
+        return text;
       }
     } catch {
       return '';
@@ -151,7 +197,11 @@ async function runBrowserOcrOnImage(
   try {
     const processedUrl = await preprocessImageForOcr(dataUrl);
     const result = await Tesseract.recognize(processedUrl, langSpec);
-    return result?.data?.text || '';
+    const text = result?.data?.text || '';
+    if (text.trim()) {
+      ocrTextCache.set(cacheKey, text);
+    }
+    return text;
   } catch (err) {
     console.warn('[Client OCR] Tesseract error:', err);
     return '';
@@ -302,57 +352,128 @@ export function extractKoreanAddressFromText(rawCorpus: string): string | null {
 }
 
 /**
+ * Helper to clean and validate candidate name words
+ */
+function filterValidNameWords(rawPhrase: string): string | null {
+  const cleaned = rawPhrase
+    .toUpperCase()
+    .replace(/[^A-Z\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!cleaned) return null;
+
+  const words = cleaned
+    .split(' ')
+    .filter((w) => w.length >= 2 && !NON_NAME_WORDS.has(w));
+
+  if (words.length >= 2 && words.length <= 4) {
+    // Ensure at least one word has >= 3 letters (avoids 2-letter OCR noise like "OI GU")
+    if (words.some((w) => w.length >= 3)) {
+      return words.join(' ');
+    }
+  }
+  return null;
+}
+
+/**
  * Extract applicant's English uppercase name from OCR text (ARC / Passport MRZ / TOPIK)
  */
 export function extractApplicantNameFromText(textCorpus: string): string | null {
   if (!textCorpus) return null;
 
   // 1. Check Passport MRZ line 1: P<KHMSURNAME<<GIVENNAME<<<<<<
-  const mrzMatch = textCorpus.match(/P<[A-Z]{3}([A-Z]+)<<([A-Z<]+)/);
+  // Also handles Tesseract misreading '<' as 'c', 'C', 'K', 'L', '«', or spaces
+  const upperCorpus = textCorpus.toUpperCase();
+  const mrzRegex = /P[<CKL«(\s]*(?:KHM|VNM|NPL|UZB|MMR|THA|IDN|PHL|CHN|MNG|LKA|BGD|PAK|IND|KAZ|KGZ|TLS|LAO|[A-Z]{3})\s*([A-Z]{2,20})[<CKL«\s]{2,}([A-Z]{2,20}(?:[<CKL«\s]+[A-Z]{2,20})?)/;
+  const mrzMatch = upperCorpus.match(mrzRegex);
   if (mrzMatch) {
-    const surname = mrzMatch[1].replace(/</g, ' ').trim();
-    const given = mrzMatch[2].replace(/</g, ' ').trim();
-    if (surname.length >= 2 && given.length >= 2) {
-      return `${surname} ${given}`.replace(/\s+/g, ' ').trim();
-    }
+    const surname = mrzMatch[1].replace(/[<«]/g, ' ').trim();
+    // Clean trailing filler chevrons (like KKKKK or LLLLL or <<<<<)
+    const given = mrzMatch[2]
+      .replace(/[<«]/g, ' ')
+      .replace(/\b[CKL]{3,}\b/g, '')
+      .trim();
+    const combinedMrz = filterValidNameWords(`${surname} ${given}`);
+    if (combinedMrz) return combinedMrz;
   }
 
-  // 2. Check explicit label: 성명 / Name followed by English uppercase words
-  const labelMatches = [
-    ...textCorpus.matchAll(/(?:성\s*명|Name|NAME|영문성명)[^\nA-Za-z]{0,18}([A-Z]{2,20}(?:[\s,]+[A-Z]{2,20}){0,3})/g),
-  ];
-  for (const m of labelMatches) {
-    const candidate = m[1].replace(/,/g, ' ').replace(/\s+/g, ' ').trim();
-    const words = candidate.split(' ').filter((w) => w.length >= 2 && !NON_NAME_WORDS.has(w));
-    if (words.length >= 2) {
-      return words.slice(0, 4).join(' ');
-    }
+  // Also check country code directly in MRZ even if 'P<' was cut off
+  const mrzCountryDirect = upperCorpus.match(
+    /(?:KHM|VNM|NPL|UZB|MMR|THA|IDN|PHL)([A-Z]{2,16})<<([A-Z]{2,16})/
+  );
+  if (mrzCountryDirect) {
+    const combinedMrz = filterValidNameWords(`${mrzCountryDirect[1]} ${mrzCountryDirect[2]}`);
+    if (combinedMrz) return combinedMrz;
   }
 
-  // 3. Look right after the 13-digit Alien Registration Number on ARC Front
-  const regIdxMatch = textCorpus.match(/\d{6}\s*[-–~.\s]\s*[1-8]\d{6}/);
+  // 2. Look right after the 13-digit Alien Registration Number on ARC Front (e.g. 950910-5760023)
+  // On every Korean ARC card, the English Name is printed on the line immediately below the Reg Number!
+  const regIdxMatch = textCorpus.match(/\b\d{6}\s*[-–~.\s]\s*[1-8]\d{6}\b/);
   if (regIdxMatch && regIdxMatch.index !== undefined) {
-    const afterReg = textCorpus.slice(regIdxMatch.index + regIdxMatch[0].length, regIdxMatch.index + 220);
-    const upperMatches = afterReg.match(/\b([A-Z]{2,18}(?:\s+[A-Z]{2,18}){1,3})\b/g);
-    if (upperMatches) {
-      for (const raw of upperMatches) {
-        const words = raw.trim().split(/\s+/).filter((w) => w.length >= 2 && !NON_NAME_WORDS.has(w));
-        if (words.length >= 2 && words.length <= 4) {
-          return words.join(' ');
+    const afterReg = textCorpus.slice(
+      regIdxMatch.index + regIdxMatch[0].length,
+      regIdxMatch.index + regIdxMatch[0].length + 240
+    );
+    const afterLines = afterReg
+      .split(/[\r\n<>]+/)
+      .map((l) => l.trim())
+      .filter((l) => l.length >= 3);
+
+    for (let i = 0; i < Math.min(4, afterLines.length); i++) {
+      // Remove Korean characters and label prefixes like 성명 / Name
+      const lineWithoutKor = afterLines[i]
+        .replace(/[가-힣]+/g, ' ')
+        .replace(/(?:Name|NAME|Sex|SEX|Country|Nationality)\b/gi, ' ');
+      const candidate = filterValidNameWords(lineWithoutKor);
+      if (candidate) {
+        return candidate;
+      }
+    }
+  }
+
+  // 3. Check explicit label: 성명 / Name / Name in English (same line OR next 1-2 lines for TOPIK tables)
+  const lines = textCorpus
+    .split(/[\r\n<>]+/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/(?:성\s*명|영문성명|Name\s*in\s*English|\bName\b|\bSurname\b)/i.test(line)) {
+      // Check same line first (after stripping the label itself)
+      const strippedSame = line
+        .replace(/[가-힣()/:：]+/g, ' ')
+        .replace(/\b(?:Name|in|English|Date|of|Birth|Sex|Gender|Male|Female|Surname|Given|Names|Registration|No)\b/gi, ' ');
+      const sameCandidate = filterValidNameWords(strippedSame);
+      if (sameCandidate) return sameCandidate;
+
+      // Check the next 2 lines (e.g., TOPIK table row below header)
+      for (let offset = 1; offset <= 2; offset++) {
+        if (i + offset < lines.length) {
+          const nextStripped = lines[i + offset]
+            .replace(/[가-힣()/:：0-9.\-]+/g, ' ')
+            .replace(/\b(?:Name|in|English|Date|of|Birth|Sex|Gender|Male|Female|Registration|No)\b/gi, ' ');
+          const nextCandidate = filterValidNameWords(nextStripped);
+          if (nextCandidate) return nextCandidate;
         }
       }
     }
   }
 
-  // 4. Scan all lines for 2-4 uppercase words (like "EANG VEASNA", "SOK SRORNG") that are not card headers
-  const lines = textCorpus.split(/[\r\n<>]+/);
-  for (const line of lines) {
-    const upperMatches = line.match(/\b([A-Z]{2,18}(?:\s+[A-Z]{2,18}){1,3})\b/g);
+  // 4. Scan all lines for 2-4 English words that are not card headers
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    // Skip lines that look like card title headers
+    if (/RESIDENCE\s+CARD|REGISTRATION\s+CARD|REPUBLIC\s+OF\s+KOREA|PROFICIENCY\s+IN\s+KOREAN/i.test(line)) {
+      continue;
+    }
+    const upperMatches = line.match(/\b([A-Za-z]{2,18}(?:\s+[A-Za-z]{2,18}){1,3})\b/g);
     if (!upperMatches) continue;
     for (const raw of upperMatches) {
-      const words = raw.trim().split(/\s+/).filter((w) => w.length >= 2 && !NON_NAME_WORDS.has(w));
-      if (words.length >= 2 && words.length <= 4) {
-        return words.join(' ');
+      const candidate = filterValidNameWords(raw);
+      if (candidate) {
+        return candidate;
       }
     }
   }
@@ -525,8 +646,8 @@ export function parseOcrCorpusToData(
 
 /**
  * Full client-side OCR extraction across all uploaded documents.
- * Uses optimal language models per document type for maximum speed & accuracy:
- * - ARC Front: 'eng+kor' (English Name, Reg No, Country, Visa Status)
+ * Runs sequentially with in-memory caching so mobile browsers never run out of RAM:
+ * - ARC Front: 'eng' (English Name, Reg No, Country, Visa Status — avoids Hangul misreads on English letters!)
  * - ARC Back: 'kor' (Korean Residence Address & Report Dates)
  * - TOPIK Cert: 'kor+eng' (Scores, Verification No, Exam No, Name)
  * - Passport: 'eng' (MRZ lines, Passport No, Name, Expiry)
@@ -537,12 +658,10 @@ export async function extractDocumentsClientSide(params: {
   topikCert?: string | null;
   passport?: string | null;
 }): Promise<ExtractedDocumentData> {
-  const [arcFrontText, arcBackText, topikText, passportText] = await Promise.all([
-    runBrowserOcrOnImage(params.arcFront, 'eng+kor'),
-    runBrowserOcrOnImage(params.arcBack, 'kor'),
-    runBrowserOcrOnImage(params.topikCert, 'kor+eng'),
-    runBrowserOcrOnImage(params.passport, 'eng'),
-  ]);
+  const arcFrontText = params.arcFront ? await runBrowserOcrOnImage(params.arcFront, 'eng') : '';
+  const passportText = params.passport ? await runBrowserOcrOnImage(params.passport, 'eng') : '';
+  const arcBackText = params.arcBack ? await runBrowserOcrOnImage(params.arcBack, 'kor') : '';
+  const topikText = params.topikCert ? await runBrowserOcrOnImage(params.topikCert, 'kor+eng') : '';
 
   return parseOcrCorpusToData(arcFrontText, arcBackText, topikText, passportText);
 }
@@ -555,58 +674,82 @@ export function mergeExtractedIntoFormData(
   prev: ApplicationFormData,
   ext: ExtractedDocumentData
 ): ApplicationFormData {
-  const isPlaceholderName = (v?: string) => !v || v === '0000 0000' || v === '0000';
-  const isPlaceholderReg1 = (v?: string) => !v || v === '000000';
-  const isPlaceholderReg2 = (v?: string) => !v || v === '0000000';
-  const isPlaceholderAddr = (v?: string) => !v || v === '00000 0000 000';
-  const isPlaceholderExamNo = (v?: string) => !v || v === '0000000000000';
-  const isPlaceholderDate = (v?: string) => !v || v === '0000-00-00';
-  const isPlaceholderRound = (v?: string) => !v || v === '000';
-  const isPlaceholderGrade = (v?: string) => !v || v === '0급';
+  const isPlaceholderName = (v?: string | null) =>
+    !v || v === '0000 0000' || v === '0000' || v === 'SOK SRORNG';
+  const isPlaceholderReg1 = (v?: string | null) =>
+    !v || v === '000000' || v === '950910';
+  const isPlaceholderReg2 = (v?: string | null) =>
+    !v || v === '0000000' || v === '5760023' || v === '1000000';
+  const isPlaceholderAddr = (v?: string | null) =>
+    !v || v === '00000 0000 000';
+  const isPlaceholderExamNo = (v?: string | null) =>
+    !v || v === '0000000000000' || v === '0010197000017';
+  const isPlaceholderDate = (v?: string | null) =>
+    !v || v === '0000-00-00';
+  const isPlaceholderRound = (v?: string | null) =>
+    !v || v === '000';
+  const isPlaceholderGrade = (v?: string | null) =>
+    !v || v === '0급';
 
-  const rawName = ext.name && !isPlaceholderName(ext.name)
-    ? ext.name
-    : (!isPlaceholderName(prev.name) ? prev.name : '');
+  const rawName =
+    ext.name && !isPlaceholderName(ext.name)
+      ? ext.name
+      : !isPlaceholderName(prev.name)
+      ? prev.name
+      : '';
   const finalName = rawName ? cleanName(rawName) : prev.name;
 
-  const rawReg1 = ext.regNumber1 && !isPlaceholderReg1(ext.regNumber1)
-    ? ext.regNumber1
-    : (!isPlaceholderReg1(prev.regNumber1) ? prev.regNumber1 : '000000');
-  const rawReg2 = ext.regNumber2 && !isPlaceholderReg2(ext.regNumber2)
-    ? ext.regNumber2
-    : (!isPlaceholderReg2(prev.regNumber2) ? prev.regNumber2 : '0000000');
+  const rawReg1 =
+    ext.regNumber1 && !isPlaceholderReg1(ext.regNumber1)
+      ? ext.regNumber1
+      : !isPlaceholderReg1(prev.regNumber1)
+      ? prev.regNumber1
+      : '000000';
+  const rawReg2 =
+    ext.regNumber2 && !isPlaceholderReg2(ext.regNumber2)
+      ? ext.regNumber2
+      : !isPlaceholderReg2(prev.regNumber2)
+      ? prev.regNumber2
+      : '0000000';
   const reg = normalizeRegNumbers(rawReg1, rawReg2);
 
-  const finalAddress = ext.address && !isPlaceholderAddr(ext.address)
-    ? ext.address
-    : prev.address;
+  const finalAddress =
+    ext.address && !isPlaceholderAddr(ext.address) ? ext.address : prev.address;
 
   const hasNewDocVer = Array.isArray(ext.docVerificationNo)
-    ? ext.docVerificationNo.length === 4 && ext.docVerificationNo.some((p: string) => p && p !== '0000')
-    : typeof ext.docVerificationNo === 'string' && ext.docVerificationNo.replace(/0|-|\s/g, '').length > 0;
+    ? ext.docVerificationNo.length === 4 &&
+      ext.docVerificationNo.some((p: string) => p && p !== '0000') &&
+      ext.docVerificationNo.join('-') !== '9849-2820-3579-7920'
+    : typeof ext.docVerificationNo === 'string' &&
+      ext.docVerificationNo.replace(/0|-|\s/g, '').length > 0;
   const docParts = hasNewDocVer
     ? normalizeDocVerificationNo(ext.docVerificationNo, prev.docVerificationNo)
     : prev.docVerificationNo;
 
-  const finalExamNo = ext.examNumber && !isPlaceholderExamNo(ext.examNumber)
-    ? cleanExamNumber(ext.examNumber)
-    : prev.examNumber;
+  const finalExamNo =
+    ext.examNumber && !isPlaceholderExamNo(ext.examNumber)
+      ? cleanExamNumber(ext.examNumber)
+      : prev.examNumber;
 
-  const finalExamDate = ext.examDate && !isPlaceholderDate(ext.examDate)
-    ? ext.examDate
-    : prev.examDate;
+  const finalExamDate =
+    ext.examDate && !isPlaceholderDate(ext.examDate)
+      ? ext.examDate
+      : prev.examDate;
 
-  const finalRound = ext.round && !isPlaceholderRound(ext.round)
-    ? cleanRound(ext.round)
-    : prev.round;
+  const finalRound =
+    ext.round && !isPlaceholderRound(ext.round)
+      ? cleanRound(ext.round)
+      : prev.round;
 
-  const finalValidUntil = ext.validUntil && !isPlaceholderDate(ext.validUntil)
-    ? ext.validUntil
-    : prev.validUntil;
+  const finalValidUntil =
+    ext.validUntil && !isPlaceholderDate(ext.validUntil)
+      ? ext.validUntil
+      : prev.validUntil;
 
-  const finalGrade = ext.grade && !isPlaceholderGrade(ext.grade)
-    ? cleanGrade(ext.grade)
-    : prev.grade;
+  const finalGrade =
+    ext.grade && !isPlaceholderGrade(ext.grade)
+      ? cleanGrade(ext.grade)
+      : prev.grade;
 
   return {
     ...prev,
@@ -614,7 +757,14 @@ export function mergeExtractedIntoFormData(
     applicantName: finalName,
     regNumber1: reg.regNumber1,
     regNumber2: reg.regNumber2,
-    gender: ext.gender === '여' ? '여' : ext.gender === '남' ? '남' : (!isPlaceholderReg2(reg.regNumber2) ? reg.gender : prev.gender),
+    gender:
+      ext.gender === '여'
+        ? '여'
+        : ext.gender === '남'
+        ? '남'
+        : !isPlaceholderReg2(reg.regNumber2)
+        ? reg.gender
+        : prev.gender,
     nationality: ext.nationality || prev.nationality || 'Cambodia',
     visaStatus: ext.visaStatus ? cleanVisaStatus(ext.visaStatus) : prev.visaStatus,
     passportNo: (ext.passportNo || prev.passportNo || '').toUpperCase().trim(),

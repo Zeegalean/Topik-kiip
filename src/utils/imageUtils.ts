@@ -6,11 +6,63 @@ export function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        resolve(reader.result);
-      } else {
+      if (typeof reader.result !== 'string') {
         reject(new Error('Failed to read file as data URL'));
+        return;
       }
+      const rawDataUrl = reader.result;
+
+      // Keep PDFs, SVGs, and small PNGs/JPEGs untouched if not huge camera photos
+      if (
+        !file.type.startsWith('image/') ||
+        file.type === 'image/svg+xml' ||
+        (file.type === 'image/png' && file.size < 450 * 1024)
+      ) {
+        resolve(rawDataUrl);
+        return;
+      }
+
+      // Normalize mobile camera photos (fixes EXIF orientation & downscales 12MP photos to crisp 1600px)
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const maxDim = 1600;
+          let width = img.naturalWidth || img.width;
+          let height = img.naturalHeight || img.height;
+
+          if (width <= maxDim && height <= maxDim && file.size < 800 * 1024) {
+            resolve(rawDataUrl);
+            return;
+          }
+
+          if (width > maxDim || height > maxDim) {
+            if (width > height) {
+              height = Math.round((height * maxDim) / width);
+              width = maxDim;
+            } else {
+              width = Math.round((width * maxDim) / height);
+              height = maxDim;
+            }
+          }
+
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(rawDataUrl);
+            return;
+          }
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(0, 0, width, height);
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL('image/jpeg', 0.90));
+        } catch {
+          resolve(rawDataUrl);
+        }
+      };
+      img.onerror = () => resolve(rawDataUrl);
+      img.src = rawDataUrl;
     };
     reader.onerror = (error) => reject(error);
     reader.readAsDataURL(file);
